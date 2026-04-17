@@ -1,0 +1,27 @@
+# Core ML
+torch==2.2.2
+torchvision==0.17.2
+timm==1.0.3
+
+# Detection
+ultralytics==8.2.0
+
+# Nutrition lookup
+faiss-cpu==1.8.0
+sentence-transformers==3.0.0
+
+# Image processing
+opencv-python==4.9.0.80
+Pillow==10.3.0
+numpy==1.26.4
+
+# API
+fastapi==0.111.0
+uvicorn==0.29.0
+python-multipart==0.0.9
+
+# Utilities
+requests==2.31.0
+pandas==2.2.2
+tqdm==4.66.4
+python-dotenv==1.0.1

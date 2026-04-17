@@ -19,3 +19,7 @@ models/
 
 # OS
 .DS_Store
+
+# FAISS index and nutrition data (too large for git)
+nutrition/usda.index
+nutrition/usda_records.json

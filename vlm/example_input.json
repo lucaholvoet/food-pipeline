@@ -1,0 +1,49 @@
+{
+  "image_base64": "<base64-encoded-image-data>",
+  "reason": "low_confidence",
+  "trigger_threshold": 0.70,
+  "cv_output": {
+    "image_id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "success",
+    "average_confidence": 0.62,
+    "plate_detected": true,
+    "items": [
+      {
+        "item_id": 1,
+        "food_name": "fried_rice",
+        "display_name": "Fried Rice",
+        "classification_confidence": 0.58,
+        "detection_confidence": 0.82,
+        "top3_predictions": [
+          { "label": "fried_rice", "confidence": 0.58 },
+          { "label": "bibimbap", "confidence": 0.22 },
+          { "label": "risotto", "confidence": 0.11 }
+        ],
+        "estimated_grams": 185,
+        "portion_method": "plate_reference",
+        "bbox": [120, 45, 380, 310],
+        "nutrition_per_100g": {
+          "calories_kcal": 163,
+          "protein_g": 3.5,
+          "fat_g": 4.9,
+          "carbs_g": 26.6,
+          "fiber_g": 0.6
+        },
+        "nutrition_total": {
+          "calories_kcal": 302,
+          "protein_g": 6.5,
+          "fat_g": 9.1,
+          "carbs_g": 49.2,
+          "fiber_g": 1.1
+        }
+      }
+    ],
+    "totals": {
+      "calories_kcal": 302,
+      "protein_g": 6.5,
+      "fat_g": 9.1,
+      "carbs_g": 49.2,
+      "fiber_g": 1.1
+    }
+  }
+}

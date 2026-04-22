@@ -1,0 +1,54 @@
+{
+  "vlm_refinement": {
+    "image_id": "550e8400-e29b-41d4-a716-446655440000",
+    "refinement_status": "completed",
+    "vlm_model": "gpt-4-vision",
+    "confidence_threshold_used": 0.70,
+    "items": [
+      {
+        "item_id": 1,
+        "action": "corrected",
+        "original": {
+          "food_name": "fried_rice",
+          "classification_confidence": 0.58
+        },
+        "refined": {
+          "food_name": "bibimbap",
+          "display_name": "Bibimbap",
+          "vlm_confidence": 0.91,
+          "food_description": "Korean rice bowl with sautéed vegetables, egg, and gochujang chili paste"
+        },
+        "portion": {
+          "estimated_grams": 280,
+          "portion_method": "vlm_visual_estimate",
+          "vlm_confidence": 0.78
+        },
+        "nutrition_per_100g": {
+          "calories_kcal": 130,
+          "protein_g": 4.5,
+          "fat_g": 3.8,
+          "carbs_g": 21.2,
+          "fiber_g": 1.8
+        },
+        "nutrition_total": {
+          "calories_kcal": 364,
+          "protein_g": 12.6,
+          "fat_g": 10.6,
+          "carbs_g": 59.4,
+          "fiber_g": 5.0
+        }
+      }
+    ],
+    "totals": {
+      "calories_kcal": 364,
+      "protein_g": 12.6,
+      "fat_g": 10.6,
+      "carbs_g": 59.4,
+      "fiber_g": 5.0
+    },
+    "notes": [
+      "CV classified as fried_rice but bibimbap was 2nd prediction; corrected based on visible gochujang sauce and egg topping"
+    ],
+    "processing_time_ms": 3200
+  }
+}

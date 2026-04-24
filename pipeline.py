@@ -11,6 +11,9 @@ from portion.portion import PortionEstimator
 from nutrition.nutrition import NutritionLookup
 from api.models import CVPipelineOutput, FoodItem, NutritionValues, TopPrediction
 
+from vlm.refiner import VLMRefiner
+from vlm.schemas import VLMRequest, RefinementReason
+
 VLM_CONFIDENCE_THRESHOLD = 0.70
 
 class FoodPipeline:
@@ -21,7 +24,8 @@ class FoodPipeline:
         labels_path: str = "models/idx_to_class.json",
         index_path: str = "nutrition/usda.index",
         records_path: str = "nutrition/usda_records.json",
-        device: str = "cpu"
+        device: str = "cpu",
+        use_vlm: bool = True
     ):
         print("Loading detector...")
         self.detector = FoodDetector(detector_path, device=device)
@@ -31,6 +35,17 @@ class FoodPipeline:
         self.portion = PortionEstimator()
         print("Loading nutrition lookup...")
         self.nutrition = NutritionLookup(index_path, records_path, device=device)
+
+        if use_vlm:
+            try:
+                self.refiner = VLMRefiner(backend="ollama", model="gemma4:26b")
+                print("VLM refiner ready.")
+            except Exception as e:
+                print(f"VLM not available: {e}. Running CV-only.")
+                self.refiner = None
+        else:
+            self.refiner = None
+
         print("Pipeline ready.")
 
     def _image_to_base64(self, image: Image.Image) -> str:
@@ -157,7 +172,7 @@ class FoodPipeline:
         totals = self._compute_totals(items)
         processing_ms = int((time.time() - start_time) * 1000)
 
-        return CVPipelineOutput(
+        result = CVPipelineOutput(
             image_id=image_id,
             image_base64=self._image_to_base64(image),
             status="success",
@@ -170,3 +185,17 @@ class FoodPipeline:
             totals=totals,
             processing_time_ms=processing_ms
         )
+
+        if result.requires_vlm_refinement and self.refiner is not None:
+            try:
+                vlm_request = VLMRequest(
+                    image_base64=result.image_base64,
+                    reason=RefinementReason.LOW_CONFIDENCE,
+                    trigger_threshold=VLM_CONFIDENCE_THRESHOLD,
+                    cv_output=result
+                )
+                return self.refiner.refine(vlm_request)
+            except Exception as e:
+                result.warnings.append(f"vlm_failed: {str(e)}")
+
+        return result

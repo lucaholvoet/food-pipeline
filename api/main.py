@@ -26,7 +26,7 @@ async def load_pipeline():
 def health():
     return {"status": "ok", "pipeline_loaded": pipeline is not None}
 
-@app.post("/analyze", response_model=CVPipelineOutput)
+@app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     if pipeline is None:
         raise HTTPException(status_code=503, detail="Pipeline not loaded")

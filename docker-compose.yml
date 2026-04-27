@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  cv-pipeline:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./nutrition:/app/nutrition
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pth
+*.pt
+*.index
+data/
+notebooks/
+.git/
+output/
+*.ipynb

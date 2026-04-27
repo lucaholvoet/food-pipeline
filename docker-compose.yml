@@ -1,13 +1,14 @@
-version: "3.8"
-
 services:
   cv-pipeline:
     build: .
     ports:
       - "8000:8000"
     volumes:
-      - ./models:/app/models
-      - ./nutrition:/app/nutrition
+      - "C:/food-pipeline-models/yolov8n_food_best.pt:/app/models/yolov8n_food_best.pt"
+      - "C:/food-pipeline-models/efficientnet_b0_food101_best.pt:/app/models/efficientnet_b0_food101_best.pt"
+      - "C:/food-pipeline-models/idx_to_class.json:/app/models/idx_to_class.json"
+      - "C:/food-pipeline-models/usda.index:/app/nutrition/usda.index"
+      - "C:/food-pipeline-models/usda_records.json:/app/nutrition/usda_records.json"
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped

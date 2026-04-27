@@ -3,9 +3,10 @@ __pycache__/
 *.pyc
 *.pth
 *.pt
-*.index
 data/
 notebooks/
 .git/
 output/
 *.ipynb
+nutrition/usda.index
+nutrition/usda_records.json

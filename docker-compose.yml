@@ -11,4 +11,27 @@ services:
       - "C:/food-pipeline-models/usda_records.json:/app/nutrition/usda_records.json"
     environment:
       - PYTHONUNBUFFERED=1
+    networks:
+      - food-net
     restart: unless-stopped
+
+  gradio-ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    ports:
+      - "7860:7860"
+    environment:
+      - API_URL=http://cv-pipeline:8000/analyze
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+      - PYTHONUNBUFFERED=1
+    networks:
+      - food-net
+    depends_on:
+      - cv-pipeline
+    restart: unless-stopped
+
+networks:
+  food-net:
+    driver: bridge

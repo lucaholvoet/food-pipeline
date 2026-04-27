@@ -188,11 +188,14 @@ class FoodPipeline:
 
         if result.requires_vlm_refinement and self.refiner is not None:
             try:
+                from vlm.schemas import CVOutput
+                cv_dict = result.model_dump()
+                cv_output = CVOutput(**cv_dict)
                 vlm_request = VLMRequest(
                     image_base64=result.image_base64,
                     reason=RefinementReason.LOW_CONFIDENCE,
                     trigger_threshold=VLM_CONFIDENCE_THRESHOLD,
-                    cv_output=result
+                    cv_output=cv_output
                 )
                 return self.refiner.refine(vlm_request)
             except Exception as e:

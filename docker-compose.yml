@@ -11,6 +11,7 @@ services:
       - "C:/food-pipeline-models/usda_records.json:/app/nutrition/usda_records.json"
     environment:
       - PYTHONUNBUFFERED=1
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
     networks:
       - food-net
     restart: unless-stopped

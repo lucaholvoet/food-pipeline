@@ -49,16 +49,14 @@ class Gemma4Client:
             self._setup_google()
 
     def _setup_google(self):
-        """Initialize Google AI Studio SDK."""
+        """Initialize Google GenAI SDK."""
         try:
-            import google.generativeai as genai
-            if self.api_key:
-                genai.configure(api_key=self.api_key)
-            self._genai = genai
+            from google import genai
+            self._genai_client = genai.Client(api_key=self.api_key)
         except ImportError:
             raise ImportError(
-                "Google AI SDK not installed. Run:\n"
-                "  pip install google-generativeai"
+                "Google GenAI SDK not installed. Run:\n"
+                "  pip install google-genai"
             )
 
     # ──────────────────────────────────────────
@@ -152,31 +150,26 @@ class Gemma4Client:
     #  Google AI Studio backend
     # ──────────────────────────────────────────
 
-    def _call_google(
-        self,
-        image_base64: str,
-        prompt: str,
-        system_prompt: Optional[str],
-    ) -> str:
-        """Call Gemma 4 via Google AI Studio API."""
-        import google.generativeai as genai
+    def _call_google(self, image_base64, prompt, system_prompt):
+        """Call Gemini via Google GenAI SDK."""
+        from google.genai import types
 
-        model = self._genai.GenerativeModel(
-            model_name=self.model,
-            system_instruction=system_prompt,
-        )
-
-        # Decode base64 for Google SDK
         image_bytes = base64.b64decode(image_base64)
 
-        response = model.generate_content([
-            prompt,
-            {
-                "mime_type": "image/jpeg",
-                "data": image_bytes,
-            },
-        ])
-
+        response = self._genai_client.models.generate_content(
+            model=self.model,
+            contents=[
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type="image/jpeg"
+                ),
+                prompt,
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=self.temperature,
+            ),
+        )
         return response.text
 
     # ──────────────────────────────────────────

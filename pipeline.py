@@ -1,3 +1,4 @@
+import os
 import time
 import uuid
 import base64
@@ -38,7 +39,7 @@ class FoodPipeline:
 
         if use_vlm:
             try:
-                self.refiner = VLMRefiner(backend="ollama", model="gemma4:26b")
+                self.refiner = VLMRefiner(backend="google", model="gemini-flash-latest", api_key=os.environ.get("GOOGLE_API_KEY"),)
                 print("VLM refiner ready.")
             except Exception as e:
                 print(f"VLM not available: {e}. Running CV-only.")
@@ -152,10 +153,20 @@ class FoodPipeline:
                 estimated_grams=grams,
                 portion_method=portion_method,
                 bbox=bbox,
-                nutrition_per_100g=NutritionValues(**{
-                    k: round(v, 2) for k, v in nutrition_100g.items()
-                }),
-                nutrition_total=NutritionValues(**nutrition_total)
+                nutrition_per_100g=NutritionValues(
+                    calories_kcal=round(nutrition_100g.get("calories_kcal", 0), 2),
+                    protein_g=round(nutrition_100g.get("protein_g", 0), 2),
+                    fat_g=round(nutrition_100g.get("fat_g", 0), 2),
+                    carbs_g=round(nutrition_100g.get("carbs_g", 0), 2),
+                    fiber_g=round(nutrition_100g.get("fiber_g", 0), 2),
+                ),
+                nutrition_total=NutritionValues(
+                calories_kcal=round(nutrition_total.get("calories_kcal", 0), 2),
+                protein_g=round(nutrition_total.get("protein_g", 0), 2),
+                fat_g=round(nutrition_total.get("fat_g", 0), 2),
+                carbs_g=round(nutrition_total.get("carbs_g", 0), 2),
+                fiber_g=round(nutrition_total.get("fiber_g", 0), 2),
+            )
             ))
 
         # Step 3 — compute average confidence and VLM trigger
@@ -163,7 +174,7 @@ class FoodPipeline:
             sum(confidence_scores) / len(confidence_scores), 4
         ) if confidence_scores else 0.0
 
-        requires_vlm = avg_confidence < VLM_CONFIDENCE_THRESHOLD
+        requires_vlm = avg_confidence < VLM_CONFIDENCE_THRESHOLD or not plate_detected #estimation is not good without plate detection, try to improve portion estimation part
 
         if requires_vlm:
             warnings.append("low_confidence_vlm_triggered")
@@ -188,14 +199,56 @@ class FoodPipeline:
 
         if result.requires_vlm_refinement and self.refiner is not None:
             try:
-                from vlm.schemas import CVOutput
-                cv_dict = result.model_dump()
-                cv_output = CVOutput(**cv_dict)
+                from vlm.schemas import (
+                    CVOutput, CVItem, CVNutrition, CVTopPrediction
+                )
+
+                def to_cv_nutrition(n: NutritionValues) -> CVNutrition:
+                    return CVNutrition(
+                        calories_kcal=n.calories_kcal,
+                        protein_g=n.protein_g,
+                        fat_g=n.fat_g,
+                        carbs_g=n.carbs_g,
+                        fiber_g=n.fiber_g,
+                    )
+
+                cv_items = [
+                    CVItem(
+                        item_id=item.item_id,
+                        food_name=item.food_name,
+                        display_name=item.display_name,
+                        classification_confidence=item.classification_confidence,
+                        detection_confidence=item.detection_confidence,
+                        top3_predictions=[
+                            CVTopPrediction(
+                                label=p.label,
+                                confidence=p.confidence,
+                            )
+                            for p in item.top3_predictions
+                        ],
+                        estimated_grams=item.estimated_grams,
+                        portion_method=item.portion_method,
+                        bbox=item.bbox,
+                        nutrition_per_100g=to_cv_nutrition(item.nutrition_per_100g),
+                        nutrition_total=to_cv_nutrition(item.nutrition_total),
+                    )
+                    for item in result.items
+                ]
+
+                cv_output = CVOutput(
+                    image_id=result.image_id,
+                    status=result.status,
+                    average_confidence=result.average_confidence,
+                    plate_detected=result.plate_detected,
+                    items=cv_items,
+                    totals=to_cv_nutrition(result.totals),
+                )
+
                 vlm_request = VLMRequest(
                     image_base64=result.image_base64,
                     reason=RefinementReason.LOW_CONFIDENCE,
                     trigger_threshold=VLM_CONFIDENCE_THRESHOLD,
-                    cv_output=cv_output
+                    cv_output=cv_output,
                 )
                 return self.refiner.refine(vlm_request)
             except Exception as e:

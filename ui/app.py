@@ -3,13 +3,13 @@ import json
 import requests
 from io import BytesIO
 from datetime import date
+from db import init_db, log_meal, get_today_meals, get_today_totals, get_weekly_data, delete_meal, generate_user_id
 
 import gradio as gr
 from PIL import Image, ImageDraw, ImageFont
 
 from profile import init_profile_db, save_profile, get_profile, update_weight, calculate_profile, ACTIVITY_MULTIPLIERS
 
-from db import init_db, log_meal, get_today_meals, get_today_totals, get_weekly_data, delete_meal
 
 init_db()
 init_profile_db()
@@ -306,11 +306,11 @@ def build_vlm_panel(data):
 
 # ── Dashboard builders ────────────────────────────────────────────────────────
 
-def build_dashboard_html():
-    today_totals = get_today_totals()
-    today_meals  = get_today_meals()
-    weekly       = get_weekly_data()
-    profile      = get_profile()
+def build_dashboard_html(user_id: str = "default"):
+    today_totals = get_today_totals(user_id)
+    today_meals  = get_today_meals(user_id)
+    weekly       = get_weekly_data(user_id)
+    profile      = get_profile(user_id)
 
     calories_eaten  = today_totals["calories_kcal"]
     daily_target    = profile["daily_calories"] if profile else 2000
@@ -479,24 +479,21 @@ def analyze_image(input_image):
     )
 
 
-def do_log_meal():
+def do_log_meal(user_id):
     data = _last_result.get("data")
     if not data:
-        return '<p class="status-error">No meal to log. Analyze a meal first.</p>', build_dashboard_html()
-
+        return '<p class="status-error">No meal to log.</p>', build_dashboard_html(user_id)
     totals = data.get("totals", {})
     items  = data.get("items", [])
     vlm    = is_vlm_response(data)
     source = "vlm" if vlm else "cv"
-
-    log_meal(totals, items, source=source)
+    log_meal(totals, items, user_id=user_id, source=source)
     _last_result["data"] = None
+    return '<p class="status-success">✓ Meal logged!</p>', build_dashboard_html(user_id)
 
-    return '<p class="status-success">✓ Meal logged!</p>', build_dashboard_html()
 
-
-def refresh_dashboard():
-    return build_dashboard_html()
+def refresh_dashboard(user_id):
+    return build_dashboard_html(user_id)
 
 def build_profile_result_html(calc, profile):
     direction = "lose" if calc["weekly_change_kg"] < 0 else "gain"
@@ -546,10 +543,34 @@ def build_profile_result_html(calc, profile):
   </div>
 </div>"""
 
+def on_save_profile(age, gender, height, weight, goal_weight, timeframe, activity, user_id):
+    try:
+        calc = save_profile(int(age), gender, float(height), float(weight),
+                            float(goal_weight), int(timeframe), activity,
+                            user_id=user_id)
+        profile = get_profile(user_id)
+        return (
+            '<p class="status-success">✓ Profile saved!</p>',
+            build_profile_result_html(calc, profile),
+            build_dashboard_html(user_id)
+        )
+    except Exception as e:
+        return f'<p class="status-error">Error: {e}</p>', "", gr.update()
+
+def on_update_weight(new_weight, user_id):
+    try:
+        calc = update_weight(float(new_weight), user_id=user_id)
+        if not calc:
+            return '<p class="status-error">Set up your profile first.</p>'
+        return f'<p class="status-success">✓ Weight updated! New target: {calc["daily_calories"]} kcal</p>'
+    except Exception as e:
+        return f'<p class="status-error">Error: {e}</p>'
 
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estimator") as demo:
+
+    user_id_state = gr.BrowserState(generate_user_id())
 
     gr.HTML("""
         <div style="text-align:center;padding:28px 0 12px">
@@ -584,7 +605,7 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
             dashboard_html = gr.HTML(build_dashboard_html())
 
         with gr.Tab("👤 Profile"):
-            profile = get_profile()
+            profile = get_profile("default")
 
             gr.HTML("<div style='margin-bottom:16px;font-size:0.9rem;color:#718096'>Set up your profile to get personalized calorie targets.</div>")
 
@@ -638,50 +659,29 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
 
     log_btn.click(
         fn=do_log_meal,
-        inputs=[],
+        inputs=[user_id_state],
         outputs=[status_html, dashboard_html],
     )
 
     refresh_btn.click(
         fn=refresh_dashboard,
-        inputs=[],
+        inputs=[user_id_state],
         outputs=[dashboard_html],
     )
-
-    def on_save_profile(age, gender, height, weight, goal_weight, timeframe, activity):
-        try:
-            calc = save_profile(int(age), gender, float(height), float(weight),
-                                float(goal_weight), int(timeframe), activity)
-            profile = get_profile()
-            return (
-                '<p class="status-success">✓ Profile saved!</p>',
-                build_profile_result_html(calc, profile),
-                build_dashboard_html()
-            )
-        except Exception as e:
-            return f'<p class="status-error">Error: {e}</p>', "", gr.update()
-
-    def on_update_weight(new_weight):
-        try:
-            calc = update_weight(float(new_weight))
-            if not calc:
-                return '<p class="status-error">Set up your profile first.</p>'
-            return f'<p class="status-success">✓ Weight updated! New daily target: {calc["daily_calories"]} kcal</p>'
-        except Exception as e:
-            return f'<p class="status-error">Error: {e}</p>'
 
     save_profile_btn.click(
         fn=on_save_profile,
         inputs=[age_input, gender_input, height_input, weight_input,
-                goal_weight_input, timeframe_input, activity_input],
+                goal_weight_input, timeframe_input, activity_input, user_id_state],
         outputs=[profile_status, profile_result, dashboard_html],
     )
 
     update_weight_btn.click(
         fn=on_update_weight,
-        inputs=[new_weight_input],
+        inputs=[new_weight_input, user_id_state],
         outputs=[update_weight_status],
     )
+
 
 
 if __name__ == "__main__":

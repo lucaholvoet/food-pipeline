@@ -18,7 +18,7 @@ def init_profile_db():
     with get_conn() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS profile (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
+                user_id TEXT PRIMARY KEY,
                 age INTEGER,
                 gender TEXT,
                 height_cm REAL,
@@ -46,41 +46,29 @@ ACTIVITY_MULTIPLIERS = {
 
 def calculate_profile(age, gender, height_cm, current_weight_kg,
                        goal_weight_kg, timeframe_weeks, activity_level):
-    # BMR — Mifflin-St Jeor
     if gender == "Male":
         bmr = 10 * current_weight_kg + 6.25 * height_cm - 5 * age + 5
     else:
         bmr = 10 * current_weight_kg + 6.25 * height_cm - 5 * age - 161
 
-    # TDEE
     multiplier = ACTIVITY_MULTIPLIERS.get(activity_level, 1.55)
     tdee = bmr * multiplier
 
-    # Daily calorie target
     weight_diff_kg = goal_weight_kg - current_weight_kg
-    total_kcal_needed = weight_diff_kg * 7700  # kcal per kg
+    total_kcal_needed = weight_diff_kg * 7700
     days = timeframe_weeks * 7
     daily_adjustment = total_kcal_needed / days if days > 0 else 0
-
-    # Cap adjustment to safe range (-1000 to +500)
     daily_adjustment = max(-1000, min(500, daily_adjustment))
-    daily_calories = round(tdee + daily_adjustment)
-    daily_calories = max(1200, daily_calories)  # never below 1200
+    daily_calories = max(1200, round(tdee + daily_adjustment))
 
-    # Macros (standard split)
-    protein_g = round(current_weight_kg * 1.8)        # 1.8g per kg bodyweight
-    fat_g     = round(daily_calories * 0.25 / 9)       # 25% of calories from fat
+    protein_g = round(current_weight_kg * 1.8)
+    fat_g     = round(daily_calories * 0.25 / 9)
     carbs_g   = round((daily_calories - protein_g * 4 - fat_g * 9) / 4)
 
-    # Weekly weight change
     actual_adjustment = daily_calories - tdee
     weekly_change_kg  = round((actual_adjustment * 7) / 7700, 2)
-
-    # Estimated weeks to goal
-    if abs(actual_adjustment) > 0:
-        est_weeks = round(abs(total_kcal_needed) / abs(actual_adjustment * 7), 1)
-    else:
-        est_weeks = 0
+    est_weeks = round(abs(total_kcal_needed) / abs(actual_adjustment * 7), 1) \
+                if abs(actual_adjustment) > 0 else 0
 
     return {
         "bmr": round(bmr),
@@ -95,18 +83,19 @@ def calculate_profile(age, gender, height_cm, current_weight_kg,
     }
 
 def save_profile(age, gender, height_cm, current_weight_kg,
-                 goal_weight_kg, timeframe_weeks, activity_level):
+                 goal_weight_kg, timeframe_weeks, activity_level,
+                 user_id: str = "default"):
     from datetime import datetime
     calc = calculate_profile(age, gender, height_cm, current_weight_kg,
                              goal_weight_kg, timeframe_weeks, activity_level)
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO profile
-            (id, age, gender, height_cm, current_weight_kg, goal_weight_kg,
+            (user_id, age, gender, height_cm, current_weight_kg, goal_weight_kg,
              timeframe_weeks, activity_level, bmr, tdee, daily_calories,
              protein_g, fat_g, carbs_g, updated_at)
-            VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(id) DO UPDATE SET
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
                 age=excluded.age, gender=excluded.gender,
                 height_cm=excluded.height_cm,
                 current_weight_kg=excluded.current_weight_kg,
@@ -118,7 +107,7 @@ def save_profile(age, gender, height_cm, current_weight_kg,
                 protein_g=excluded.protein_g, fat_g=excluded.fat_g,
                 carbs_g=excluded.carbs_g, updated_at=excluded.updated_at
         """, (
-            age, gender, height_cm, current_weight_kg, goal_weight_kg,
+            user_id, age, gender, height_cm, current_weight_kg, goal_weight_kg,
             timeframe_weeks, activity_level,
             calc["bmr"], calc["tdee"], calc["daily_calories"],
             calc["protein_g"], calc["fat_g"], calc["carbs_g"],
@@ -126,17 +115,20 @@ def save_profile(age, gender, height_cm, current_weight_kg,
         ))
     return calc
 
-def get_profile():
+def get_profile(user_id: str = "default"):
     with get_conn() as conn:
-        row = conn.execute("SELECT * FROM profile WHERE id = 1").fetchone()
+        row = conn.execute(
+            "SELECT * FROM profile WHERE user_id = ?", (user_id,)
+        ).fetchone()
     return dict(row) if row else None
 
-def update_weight(new_weight_kg):
-    profile = get_profile()
+def update_weight(new_weight_kg, user_id: str = "default"):
+    profile = get_profile(user_id)
     if not profile:
         return None
     return save_profile(
         profile["age"], profile["gender"], profile["height_cm"],
         new_weight_kg, profile["goal_weight_kg"],
-        profile["timeframe_weeks"], profile["activity_level"]
+        profile["timeframe_weeks"], profile["activity_level"],
+        user_id=user_id
     )

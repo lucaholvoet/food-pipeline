@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import uuid
 from datetime import datetime, date, timedelta
 from contextlib import contextmanager
 
@@ -20,6 +21,7 @@ def init_db():
         conn.execute("""
             CREATE TABLE IF NOT EXISTS meals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL DEFAULT 'default',
                 logged_at TEXT NOT NULL,
                 meal_name TEXT,
                 calories_kcal REAL,
@@ -31,19 +33,28 @@ def init_db():
                 source TEXT DEFAULT 'cv'
             )
         """)
+        # migrate existing table if user_id column missing
+        try:
+            conn.execute("ALTER TABLE meals ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'")
+        except Exception:
+            pass
 
-def log_meal(totals: dict, items: list, source: str = "cv", meal_name: str = None):
+def generate_user_id() -> str:
+    return str(uuid.uuid4())
+
+def log_meal(totals: dict, items: list, user_id: str = "default",
+             source: str = "cv", meal_name: str = None):
     import json
     now = datetime.now().isoformat()
     name = meal_name or _auto_name(items)
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO meals
-            (logged_at, meal_name, calories_kcal, protein_g, fat_g, carbs_g, fiber_g, items_json, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, logged_at, meal_name, calories_kcal, protein_g, fat_g,
+             carbs_g, fiber_g, items_json, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            now,
-            name,
+            user_id, now, name,
             totals.get("calories_kcal", 0),
             totals.get("protein_g", 0),
             totals.get("fat_g", 0),
@@ -61,17 +72,17 @@ def _auto_name(items: list) -> str:
             names.append(name)
     return ", ".join(names) if names else "Meal"
 
-def get_today_meals():
+def get_today_meals(user_id: str = "default"):
     today = date.today().isoformat()
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT * FROM meals
-            WHERE DATE(logged_at) = ?
+            WHERE DATE(logged_at) = ? AND user_id = ?
             ORDER BY logged_at DESC
-        """, (today,)).fetchall()
+        """, (today, user_id)).fetchall()
     return [dict(r) for r in rows]
 
-def get_today_totals():
+def get_today_totals(user_id: str = "default"):
     today = date.today().isoformat()
     with get_conn() as conn:
         row = conn.execute("""
@@ -83,29 +94,25 @@ def get_today_totals():
                 COALESCE(SUM(fiber_g), 0) as fiber_g,
                 COUNT(*) as meal_count
             FROM meals
-            WHERE DATE(logged_at) = ?
-        """, (today,)).fetchone()
+            WHERE DATE(logged_at) = ? AND user_id = ?
+        """, (today, user_id)).fetchone()
     return dict(row)
 
-def get_weekly_data():
+def get_weekly_data(user_id: str = "default"):
     today = date.today()
-    days = []
-    for i in range(6, -1, -1):
-        d = (today - timedelta(days=i)).isoformat()
-        days.append(d)
-
+    days = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT DATE(logged_at) as day,
                    COALESCE(SUM(calories_kcal), 0) as calories
             FROM meals
-            WHERE DATE(logged_at) >= ?
+            WHERE DATE(logged_at) >= ? AND user_id = ?
             GROUP BY DATE(logged_at)
-        """, (days[0],)).fetchall()
-
+        """, (days[0], user_id)).fetchall()
     daily = {r["day"]: r["calories"] for r in rows}
     return [(d, daily.get(d, 0)) for d in days]
 
-def delete_meal(meal_id: int):
+def delete_meal(meal_id: int, user_id: str = "default"):
     with get_conn() as conn:
-        conn.execute("DELETE FROM meals WHERE id = ?", (meal_id,))
+        conn.execute("DELETE FROM meals WHERE id = ? AND user_id = ?",
+                     (meal_id, user_id))

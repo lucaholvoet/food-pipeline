@@ -1,38 +1,32 @@
 import os
+import json
 import requests
 from io import BytesIO
+from datetime import date
 
 import gradio as gr
 from PIL import Image, ImageDraw, ImageFont
+
+from profile import init_profile_db, save_profile, get_profile, update_weight, calculate_profile, ACTIVITY_MULTIPLIERS
+
+from db import init_db, log_meal, get_today_meals, get_today_totals, get_weekly_data, delete_meal
+
+init_db()
+init_profile_db()
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000/analyze")
 
 BBOX_COLORS = [
-    "#FF6B6B",  # coral
-    "#4ECDC4",  # teal
-    "#45B7D1",  # sky blue
-    "#96CEB4",  # sage
-    "#F8B500",  # amber
-    "#DDA0DD",  # plum
-    "#98D8C8",  # mint
-    "#F7DC6F",  # gold
+    "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
+    "#F8B500", "#DDA0DD", "#98D8C8", "#F7DC6F",
 ]
 
 WARNING_LABELS = {
-    "no_plate_detected": (
-        "No plate detected",
-        "Portion estimates may be less accurate",
-    ),
-    "low_confidence_vlm_triggered": (
-        "Low confidence — AI refinement used",
-        "CV confidence was below 70%",
-    ),
-    "no_food_detected": (
-        "No food detected",
-        "No food items were found in this image",
-    ),
+    "no_plate_detected": ("No plate detected", "Portion estimates may be less accurate"),
+    "low_confidence_vlm_triggered": ("Low confidence — AI refinement used", "CV confidence was below 70%"),
+    "no_food_detected": ("No food detected", "No food items were found in this image"),
 }
 
 CUSTOM_CSS = """
@@ -53,23 +47,15 @@ CUSTOM_CSS = """
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
     border-radius: 16px; padding: 24px 32px; color: white; margin: 16px 0;
 }
-.totals-label {
-    font-size: 0.82rem; color: #a0aec0;
-    text-transform: uppercase; letter-spacing: 0.06em;
-}
-.totals-calories {
-    font-size: 3.2rem; font-weight: 800; color: #f8b500; line-height: 1.1; margin: 4px 0;
-}
+.totals-label { font-size: 0.82rem; color: #a0aec0; text-transform: uppercase; letter-spacing: 0.06em; }
+.totals-calories { font-size: 3.2rem; font-weight: 800; color: #f8b500; line-height: 1.1; margin: 4px 0; }
 .macros-row { display: flex; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
 .macro-pill {
     background: rgba(255,255,255,0.08); border-radius: 10px;
     padding: 10px 18px; text-align: center; flex: 1; min-width: 72px;
 }
 .macro-value { font-size: 1.15rem; font-weight: 700; color: #e2e8f0; }
-.macro-name {
-    font-size: 0.68rem; color: #718096;
-    text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px;
-}
+.macro-name { font-size: 0.68rem; color: #718096; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
 .proc-time { font-size: 0.75rem; color: #a0aec0; text-align: right; margin-top: 10px; }
 
 .badge { border-radius: 12px; padding: 3px 10px; font-size: 0.78rem; font-weight: 600; }
@@ -82,79 +68,67 @@ CUSTOM_CSS = """
     padding: 10px 16px; border-radius: 0 6px 6px 0;
     color: #78350f; font-size: 0.88rem; margin: 4px 0;
 }
-
 .section-title {
     font-size: 0.85rem; font-weight: 700; color: #4a5568;
     text-transform: uppercase; letter-spacing: 0.07em;
     margin: 20px 0 10px; padding-bottom: 6px;
     border-bottom: 2px solid #e2e8f0;
 }
-
 .vlm-header {
     background: linear-gradient(90deg, #4a00e0, #8e2de2);
     color: white; padding: 12px 20px; border-radius: 10px;
     font-weight: 700; margin-bottom: 12px; font-size: 0.92rem;
 }
-.vlm-card {
-    border: 1px solid #e9d8fd; border-radius: 10px;
-    padding: 16px; margin: 8px 0; background: #faf5ff;
-}
-.vlm-note {
-    background: #f3e8ff; border-left: 3px solid #805ad5;
-    padding: 8px 14px; border-radius: 0 6px 6px 0;
-    font-size: 0.83rem; color: #553c9a; margin-top: 6px;
-}
-.action-badge {
-    display: inline-block; border-radius: 4px;
-    padding: 2px 8px; font-size: 0.75rem; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.04em; margin-right: 8px;
-}
+.vlm-card { border: 1px solid #e9d8fd; border-radius: 10px; padding: 16px; margin: 8px 0; background: #faf5ff; }
+.vlm-note { background: #f3e8ff; border-left: 3px solid #805ad5; padding: 8px 14px; border-radius: 0 6px 6px 0; font-size: 0.83rem; color: #553c9a; margin-top: 6px; }
+.action-badge { display: inline-block; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 8px; }
 .action-corrected { background: #fed7d7; color: #c53030; }
 .action-confirmed { background: #c6f6d5; color: #276749; }
 .action-unknown   { background: #fefcbf; color: #744210; }
-
-.color-dot {
-    display: inline-block; border-radius: 50%;
-    vertical-align: middle; margin-right: 6px;
-}
+.color-dot { display: inline-block; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
 .status-error { color: #e53e3e; font-size: 0.9rem; padding: 4px 0; }
+.status-success { color: #276749; font-size: 0.9rem; padding: 4px 0; font-weight: 600; }
+
+.log-btn { margin-top: 8px; }
+.dashboard-card {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border-radius: 16px; padding: 20px 28px; color: white; margin: 8px 0;
+    text-align: center;
+}
+.dashboard-number { font-size: 2.4rem; font-weight: 800; color: #f8b500; }
+.dashboard-label { font-size: 0.78rem; color: #a0aec0; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+.meal-row { padding: 12px 0; border-bottom: 1px solid #edf2f7; display: flex; justify-content: space-between; align-items: center; }
+.meal-row:last-child { border-bottom: none; }
+.bar-container { background: #edf2f7; border-radius: 8px; height: 24px; margin: 4px 0; overflow: hidden; position: relative; }
+.bar-fill { background: linear-gradient(90deg, #f8b500, #f97316); height: 100%; border-radius: 8px; transition: width 0.3s; }
+.bar-label { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 0.75rem; font-weight: 600; color: #2d3748; }
 """
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _is_dark(hex_color: str) -> bool:
+def _is_dark(hex_color):
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.55
 
-
-def confidence_badge(conf: float) -> str:
+def confidence_badge(conf):
     pct = int(round(conf * 100))
-    if conf >= 0.80:
-        cls = "badge-green"
-    elif conf >= 0.60:
-        cls = "badge-yellow"
-    else:
-        cls = "badge-red"
+    cls = "badge-green" if conf >= 0.80 else "badge-yellow" if conf >= 0.60 else "badge-red"
     return f'<span class="badge {cls}">{pct}%</span>'
 
-
-def is_vlm_response(data: dict) -> bool:
-    # CVPipelineOutput has "status"; VLMResponse has "refinement_status"
+def is_vlm_response(data):
     return "refinement_status" in data
 
 
 # ── Bbox drawing ──────────────────────────────────────────────────────────────
 
-def draw_bboxes(image_pil: Image.Image, items: list) -> Image.Image:
+def draw_bboxes(image_pil, items):
     annotated = image_pil.copy()
     draw = ImageDraw.Draw(annotated)
-
     font = None
     for path in [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
     ]:
         try:
@@ -169,35 +143,24 @@ def draw_bboxes(image_pil: Image.Image, items: list) -> Image.Image:
         bbox = item.get("bbox", [])
         if not bbox or len(bbox) != 4:
             continue
-
         x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
         color = BBOX_COLORS[idx % len(BBOX_COLORS)]
-
         draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
-
         conf_pct = int(round(float(item.get("classification_confidence", 0)) * 100))
         label = f"{item.get('display_name', 'Unknown')} {conf_pct}%"
-
-        text_bbox = draw.textbbox((0, 0), label, font=font)
-        tw = text_bbox[2] - text_bbox[0]
-        th = text_bbox[3] - text_bbox[1]
-
-        label_y0 = max(0, y1 - th - 8)
-        label_y1 = max(th + 6, y1)
-        draw.rectangle([x1, label_y0, x1 + tw + 10, label_y1], fill=color)
-        draw.text(
-            (x1 + 5, label_y0 + 3),
-            label,
-            fill="white" if _is_dark(color) else "#1a1a1a",
-            font=font,
-        )
-
+        tb = draw.textbbox((0, 0), label, font=font)
+        tw, th = tb[2] - tb[0], tb[3] - tb[1]
+        ly0 = max(0, y1 - th - 8)
+        ly1 = max(th + 6, y1)
+        draw.rectangle([x1, ly0, x1 + tw + 10, ly1], fill=color)
+        draw.text((x1 + 5, ly0 + 3), label,
+                  fill="white" if _is_dark(color) else "#1a1a1a", font=font)
     return annotated
 
 
 # ── HTML builders ─────────────────────────────────────────────────────────────
 
-def build_warnings_html(warnings: list) -> str:
+def build_warnings_html(warnings):
     if not warnings:
         return ""
     parts = []
@@ -205,95 +168,67 @@ def build_warnings_html(warnings: list) -> str:
         if w in WARNING_LABELS:
             title, detail = WARNING_LABELS[w]
         else:
-            title = w.replace("_", " ").title()
-            detail = ""
+            title, detail = w.replace("_", " ").title(), ""
         detail_str = f" — {detail}" if detail else ""
-        parts.append(
-            f'<div class="warning-banner">⚠ <strong>{title}</strong>{detail_str}</div>'
-        )
+        parts.append(f'<div class="warning-banner">⚠ <strong>{title}</strong>{detail_str}</div>')
     return "\n".join(parts)
 
 
-def build_totals_html(totals: dict, proc_ms: int) -> str:
+def build_totals_html(totals, proc_ms):
     cal   = f"{float(totals.get('calories_kcal', 0)):,.1f}"
     prot  = f"{float(totals.get('protein_g', 0)):.1f}g"
     fat   = f"{float(totals.get('fat_g', 0)):.1f}g"
     carbs = f"{float(totals.get('carbs_g', 0)):.1f}g"
     fiber = f"{float(totals.get('fiber_g', 0)):.1f}g"
-
     return f"""
 <div class="totals-card">
   <div class="totals-label">Total Calories</div>
   <div class="totals-calories">{cal} kcal</div>
   <div class="macros-row">
-    <div class="macro-pill">
-      <div class="macro-value">{prot}</div>
-      <div class="macro-name">Protein</div>
-    </div>
-    <div class="macro-pill">
-      <div class="macro-value">{fat}</div>
-      <div class="macro-name">Fat</div>
-    </div>
-    <div class="macro-pill">
-      <div class="macro-value">{carbs}</div>
-      <div class="macro-name">Carbs</div>
-    </div>
-    <div class="macro-pill">
-      <div class="macro-value">{fiber}</div>
-      <div class="macro-name">Fiber</div>
-    </div>
+    <div class="macro-pill"><div class="macro-value">{prot}</div><div class="macro-name">Protein</div></div>
+    <div class="macro-pill"><div class="macro-value">{fat}</div><div class="macro-name">Fat</div></div>
+    <div class="macro-pill"><div class="macro-value">{carbs}</div><div class="macro-name">Carbs</div></div>
+    <div class="macro-pill"><div class="macro-value">{fiber}</div><div class="macro-name">Fiber</div></div>
   </div>
   <div class="proc-time">Processed in {proc_ms:,}ms</div>
 </div>"""
 
 
-def _table_header(conf_label: str = "Confidence") -> str:
+def _table_header(conf_label="Confidence"):
     return f"""
-<table class="food-table">
-<thead><tr>
-  <th>#</th>
-  <th>Food</th>
-  <th>Grams</th>
-  <th>Calories</th>
-  <th>Protein</th>
-  <th>Fat</th>
-  <th>Carbs</th>
-  <th>Fiber</th>
-  <th>{conf_label}</th>
-</tr></thead>
-<tbody>"""
+<table class="food-table"><thead><tr>
+  <th>#</th><th>Food</th><th>Grams</th><th>Calories</th>
+  <th>Protein</th><th>Fat</th><th>Carbs</th><th>Fiber</th><th>{conf_label}</th>
+</tr></thead><tbody>"""
 
 
-def build_cv_items_table(items: list) -> str:
+def build_cv_items_table(items):
     if not items:
         return '<p style="color:#718096;font-size:0.9rem;padding:8px 0">No food items detected.</p>'
-
-    rows = _table_header("Confidence")
+    rows = _table_header()
     for idx, item in enumerate(items):
         color = BBOX_COLORS[idx % len(BBOX_COLORS)]
         dot = f'<span class="color-dot" style="width:12px;height:12px;background:{color}"></span>'
         n = item.get("nutrition_total", {})
         conf = float(item.get("classification_confidence", 0))
         grams = float(item.get("estimated_grams", 0))
-        rows += f"""
-<tr>
-  <td>{dot}{item.get("item_id", idx + 1)}</td>
-  <td><strong>{item.get("display_name", "")}</strong></td>
+        rows += f"""<tr>
+  <td>{dot}{item.get("item_id", idx+1)}</td>
+  <td><strong>{item.get("display_name","")}</strong></td>
   <td>{grams:.0f}g</td>
-  <td>{float(n.get("calories_kcal", 0)):.0f}</td>
-  <td>{float(n.get("protein_g", 0)):.1f}g</td>
-  <td>{float(n.get("fat_g", 0)):.1f}g</td>
-  <td>{float(n.get("carbs_g", 0)):.1f}g</td>
-  <td>{float(n.get("fiber_g", 0)):.1f}g</td>
+  <td>{float(n.get("calories_kcal",0)):.0f}</td>
+  <td>{float(n.get("protein_g",0)):.1f}g</td>
+  <td>{float(n.get("fat_g",0)):.1f}g</td>
+  <td>{float(n.get("carbs_g",0)):.1f}g</td>
+  <td>{float(n.get("fiber_g",0)):.1f}g</td>
   <td>{confidence_badge(conf)}</td>
 </tr>"""
     return rows + "</tbody></table>"
 
 
-def build_vlm_items_table(items: list) -> str:
+def build_vlm_items_table(items):
     if not items:
         return ""
-
     rows = _table_header("VLM Conf")
     for idx, item in enumerate(items):
         color = BBOX_COLORS[idx % len(BBOX_COLORS)]
@@ -304,92 +239,61 @@ def build_vlm_items_table(items: list) -> str:
         n = item.get("nutrition_total", {})
         conf = float(refined.get("vlm_confidence", 0))
         grams = float(portion.get("estimated_grams", 0))
-
         if item.get("action") == "corrected":
             orig_name = original.get("food_name", "").replace("_", " ").title()
-            food_cell = (
-                f'<s style="color:#a0aec0;font-size:0.82rem">{orig_name}</s><br>'
-                f'<strong>{refined.get("display_name", "")}</strong>'
-            )
+            food_cell = f'<s style="color:#a0aec0;font-size:0.82rem">{orig_name}</s><br><strong>{refined.get("display_name","")}</strong>'
         else:
-            food_cell = f'<strong>{refined.get("display_name", "")}</strong>'
-
-        rows += f"""
-<tr>
-  <td>{dot}{item.get("item_id", idx + 1)}</td>
+            food_cell = f'<strong>{refined.get("display_name","")}</strong>'
+        rows += f"""<tr>
+  <td>{dot}{item.get("item_id", idx+1)}</td>
   <td>{food_cell}</td>
   <td>{grams:.0f}g</td>
-  <td>{float(n.get("calories_kcal", 0)):.0f}</td>
-  <td>{float(n.get("protein_g", 0)):.1f}g</td>
-  <td>{float(n.get("fat_g", 0)):.1f}g</td>
-  <td>{float(n.get("carbs_g", 0)):.1f}g</td>
-  <td>{float(n.get("fiber_g", 0)):.1f}g</td>
+  <td>{float(n.get("calories_kcal",0)):.0f}</td>
+  <td>{float(n.get("protein_g",0)):.1f}g</td>
+  <td>{float(n.get("fat_g",0)):.1f}g</td>
+  <td>{float(n.get("carbs_g",0)):.1f}g</td>
+  <td>{float(n.get("fiber_g",0)):.1f}g</td>
   <td>{confidence_badge(conf)}</td>
 </tr>"""
     return rows + "</tbody></table>"
 
 
-def build_vlm_panel(data: dict) -> str:
+def build_vlm_panel(data):
     model     = data.get("vlm_model", "VLM")
     threshold = int(float(data.get("confidence_threshold_used", 0.70)) * 100)
     status    = data.get("refinement_status", "completed")
-
-    header = (
-        f'<div class="vlm-header">'
-        f'🤖 AI Refinement &nbsp;·&nbsp; {model} &nbsp;·&nbsp; '
-        f'threshold: {threshold}% &nbsp;·&nbsp; {status}'
-        f'</div>'
-    )
-
+    header = f'<div class="vlm-header">🤖 AI Refinement &nbsp;·&nbsp; {model} &nbsp;·&nbsp; threshold: {threshold}% &nbsp;·&nbsp; {status}</div>'
     cards = []
     for item in data.get("items", []):
         action   = item.get("action", "unknown")
         refined  = item.get("refined", {})
         original = item.get("original", {})
         portion  = item.get("portion", {})
-
         orig_conf_pct = int(round(float(original.get("classification_confidence", 0)) * 100))
         vlm_conf_pct  = int(round(float(refined.get("vlm_confidence", 0)) * 100))
         orig_name     = original.get("food_name", "").replace("_", " ").title()
         refined_name  = refined.get("display_name", "")
-
         if action == "corrected":
-            food_line = (
-                f'<span style="color:#e53e3e;text-decoration:line-through">{orig_name}</span>'
-                f'<span style="color:#805ad5;font-weight:bold;margin:0 8px">→</span>'
-                f'<strong style="color:#276749">{refined_name}</strong>'
-            )
+            food_line = f'<span style="color:#e53e3e;text-decoration:line-through">{orig_name}</span><span style="color:#805ad5;font-weight:bold;margin:0 8px">→</span><strong style="color:#276749">{refined_name}</strong>'
         elif action == "confirmed":
             food_line = f'<strong style="color:#276749">{refined_name}</strong>'
         else:
             food_line = f'<strong style="color:#2d3748">{refined_name}</strong>'
-
         desc = refined.get("food_description", "")
-        desc_html = (
-            f'<div style="color:#4a5568;font-size:0.85rem;margin:6px 0">{desc}</div>'
-            if desc else ""
-        )
-
+        desc_html = f'<div style="color:#4a5568;font-size:0.85rem;margin:6px 0">{desc}</div>' if desc else ""
         portion_method = portion.get("portion_method", "").replace("_", " ")
         portion_conf   = int(round(float(portion.get("vlm_confidence", 0)) * 100))
         grams          = float(portion.get("estimated_grams", 0))
-
-        cards.append(f"""
-<div class="vlm-card">
+        cards.append(f"""<div class="vlm-card">
   <div style="margin-bottom:8px">
     <span class="action-badge action-{action}">{action}</span>
-    <span style="color:#718096;font-size:0.85rem">Item #{item.get("item_id", "")}</span>
-    <span style="float:right;color:#718096;font-size:0.82rem">
-      CV {orig_conf_pct}% → VLM {vlm_conf_pct}%
-    </span>
+    <span style="color:#718096;font-size:0.85rem">Item #{item.get("item_id","")}</span>
+    <span style="float:right;color:#718096;font-size:0.82rem">CV {orig_conf_pct}% → VLM {vlm_conf_pct}%</span>
   </div>
   <div style="font-size:1rem;margin:6px 0">{food_line}</div>
   {desc_html}
-  <div style="color:#718096;font-size:0.82rem;margin-top:4px">
-    Portion: {grams:.0f}g via {portion_method} ({portion_conf}% confidence)
-  </div>
+  <div style="color:#718096;font-size:0.82rem;margin-top:4px">Portion: {grams:.0f}g via {portion_method} ({portion_conf}% confidence)</div>
 </div>""")
-
     notes = data.get("notes", [])
     if isinstance(notes, str):
         notes = [notes]
@@ -397,28 +301,119 @@ def build_vlm_panel(data: dict) -> str:
     if notes:
         note_items = "".join(f'<div class="vlm-note">{n}</div>' for n in notes)
         notes_html = f'<div class="section-title">Notes</div>{note_items}'
-
     return header + "\n".join(cards) + notes_html
 
 
-# ── Gradio callback ───────────────────────────────────────────────────────────
+# ── Dashboard builders ────────────────────────────────────────────────────────
 
-def _empty_return(msg: str = "") -> tuple:
+def build_dashboard_html():
+    today_totals = get_today_totals()
+    today_meals  = get_today_meals()
+    weekly       = get_weekly_data()
+    profile      = get_profile()
+
+    calories_eaten  = today_totals["calories_kcal"]
+    daily_target    = profile["daily_calories"] if profile else 2000
+    calories_left   = max(0, daily_target - calories_eaten)
+    progress_pct    = min(100, int((calories_eaten / daily_target) * 100)) if daily_target else 0
+    bar_color       = "#e53e3e" if progress_pct > 100 else "#f8b500"
+    count           = today_totals["meal_count"]
+
+    summary = f"""
+<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div>
+      <div style="font-size:0.78rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.06em">Calories today</div>
+      <div style="font-size:2.8rem;font-weight:800;color:#f8b500;line-height:1">{calories_eaten:,.0f}</div>
+      <div style="font-size:0.85rem;color:#a0aec0">of {daily_target:,.0f} target</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:2rem;font-weight:700;color:{'#48bb78' if calories_left > 0 else '#e53e3e'}">{calories_left:,.0f}</div>
+      <div style="font-size:0.78rem;color:#a0aec0">{'remaining' if calories_left > 0 else 'over target'}</div>
+    </div>
+  </div>
+  <div style="background:rgba(255,255,255,0.1);border-radius:8px;height:8px;overflow:hidden">
+    <div style="background:{bar_color};height:100%;width:{progress_pct}%;border-radius:8px;transition:width 0.3s"></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px">
+    <div style="text-align:center"><div style="font-weight:700">{today_totals['protein_g']:.0f}g</div><div style="font-size:0.68rem;color:#a0aec0">PROTEIN</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{today_totals['fat_g']:.0f}g</div><div style="font-size:0.68rem;color:#a0aec0">FAT</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{today_totals['carbs_g']:.0f}g</div><div style="font-size:0.68rem;color:#a0aec0">CARBS</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{count}</div><div style="font-size:0.68rem;color:#a0aec0">MEALS</div></div>
+  </div>
+</div>"""
+    
+    # weekly bar chart
+    max_cal = max((c for _, c in weekly), default=1) or 1
+    days_short = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+    bars = ""
+    for day_str, cal_val in weekly:
+        try:
+            d = date.fromisoformat(day_str)
+            label = "Today" if d == date.today() else days_short[d.weekday()]
+        except Exception:
+            label = day_str
+        pct = int((cal_val / max_cal) * 100)
+        bars += f"""
+<div style="margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:#4a5568;margin-bottom:3px">
+    <span>{label}</span><span>{cal_val:,.0f} kcal</span>
+  </div>
+  <div class="bar-container">
+    <div class="bar-fill" style="width:{pct}%"></div>
+  </div>
+</div>"""
+
+    weekly_section = f"""
+<div class="section-title">Last 7 days</div>
+<div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0">
+{bars}
+</div>"""
+
+    # today's meals list
+    if today_meals:
+        meal_rows = ""
+        for m in today_meals:
+            time_str = m["logged_at"][11:16]
+            meal_rows += f"""
+<div class="meal-row">
+  <div>
+    <div style="font-weight:600;color:#2d3748">{m["meal_name"]}</div>
+    <div style="font-size:0.78rem;color:#718096">{time_str} &nbsp;·&nbsp; {m["protein_g"]:.0f}g protein &nbsp;·&nbsp; {m["carbs_g"]:.0f}g carbs</div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-weight:700;color:#f8b500">{m["calories_kcal"]:.0f} kcal</div>
+  </div>
+</div>"""
+        meals_section = f'<div class="section-title">Today\'s meals</div><div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0">{meal_rows}</div>'
+    else:
+        meals_section = '<div style="color:#718096;text-align:center;padding:24px">No meals logged today. Analyze a meal and click Log Meal!</div>'
+
+    return summary + weekly_section + meals_section
+
+
+# ── Gradio callbacks ──────────────────────────────────────────────────────────
+
+# Store last result for logging
+_last_result = {"data": None}
+
+def _empty_return(msg=""):
     hidden = gr.update(visible=False)
     status = f'<p class="status-error">{msg}</p>' if msg else ""
     return (
-        gr.update(value=None, visible=False),  # output_image
-        gr.update(value=""),                   # warnings_html
-        hidden,                                 # warnings_panel
-        gr.update(value=""),                   # results_html
-        hidden,                                 # results_panel
-        gr.update(value=""),                   # vlm_html
-        hidden,                                 # vlm_panel
-        status,                                 # status_html
+        gr.update(value=None, visible=False),
+        gr.update(value=""),
+        hidden,
+        gr.update(value=""),
+        hidden,
+        gr.update(value=""),
+        hidden,
+        status,
+        gr.update(visible=False),
     )
 
 
-def analyze_image(input_image: Image.Image) -> tuple:
+def analyze_image(input_image):
     if input_image is None:
         return _empty_return("Please upload or capture an image first.")
 
@@ -427,15 +422,9 @@ def analyze_image(input_image: Image.Image) -> tuple:
     buf.seek(0)
 
     try:
-        resp = requests.post(
-            API_URL,
-            files={"file": ("image.jpg", buf, "image/jpeg")},
-            timeout=180,
-        )
+        resp = requests.post(API_URL, files={"file": ("image.jpg", buf, "image/jpeg")}, timeout=180)
     except requests.ConnectionError:
-        return _empty_return(
-            f"Cannot connect to backend at <code>{API_URL}</code>. Is it running?"
-        )
+        return _empty_return(f"Cannot connect to backend at <code>{API_URL}</code>. Is it running?")
     except requests.Timeout:
         return _empty_return("Request timed out — the pipeline may still be loading.")
 
@@ -456,29 +445,23 @@ def analyze_image(input_image: Image.Image) -> tuple:
         return _empty_return("Backend returned an invalid response.")
 
     try:
+        _last_result["data"] = data
         vlm      = is_vlm_response(data)
         items    = data.get("items", [])
         warnings = data.get("warnings", [])
 
+        annotated = None
         if not vlm and items:
             try:
                 annotated = draw_bboxes(input_image, items)
             except Exception:
-                annotated = None
-        else:
-            annotated = None
+                pass
 
         w_html       = build_warnings_html(warnings)
-        totals_html  = build_totals_html(
-            data.get("totals", {}), data.get("processing_time_ms", 0)
-        )
+        totals_html  = build_totals_html(data.get("totals", {}), data.get("processing_time_ms", 0))
         table_html   = build_vlm_items_table(items) if vlm else build_cv_items_table(items)
-        results_html = (
-            totals_html
-            + '<div class="section-title">Per-item Breakdown</div>'
-            + table_html
-        )
-        vlm_html = build_vlm_panel(data) if vlm else ""
+        results_html = totals_html + '<div class="section-title">Per-item Breakdown</div>' + table_html
+        vlm_html     = build_vlm_panel(data) if vlm else ""
 
     except Exception as e:
         return _empty_return(f"Unexpected response format: {e}")
@@ -492,7 +475,76 @@ def analyze_image(input_image: Image.Image) -> tuple:
         gr.update(value=vlm_html),
         gr.update(visible=vlm),
         "",
+        gr.update(visible=True),  # show log button
     )
+
+
+def do_log_meal():
+    data = _last_result.get("data")
+    if not data:
+        return '<p class="status-error">No meal to log. Analyze a meal first.</p>', build_dashboard_html()
+
+    totals = data.get("totals", {})
+    items  = data.get("items", [])
+    vlm    = is_vlm_response(data)
+    source = "vlm" if vlm else "cv"
+
+    log_meal(totals, items, source=source)
+    _last_result["data"] = None
+
+    return '<p class="status-success">✓ Meal logged!</p>', build_dashboard_html()
+
+
+def refresh_dashboard():
+    return build_dashboard_html()
+
+def build_profile_result_html(calc, profile):
+    direction = "lose" if calc["weekly_change_kg"] < 0 else "gain"
+    arrow = "↓" if calc["weekly_change_kg"] < 0 else "↑"
+    color = "#48bb78" if direction == "lose" else "#f6ad55"
+
+    return f"""
+<div style="margin-top:16px">
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px">
+    <div class="dashboard-card">
+      <div class="dashboard-number" style="color:#f8b500">{calc['daily_calories']}</div>
+      <div class="dashboard-label">daily calorie target</div>
+    </div>
+    <div class="dashboard-card">
+      <div class="dashboard-number" style="color:{color}">{arrow} {abs(calc['weekly_change_kg'])}kg</div>
+      <div class="dashboard-label">expected per week</div>
+    </div>
+    <div class="dashboard-card">
+      <div class="dashboard-number" style="font-size:1.8rem">{calc['est_weeks']}w</div>
+      <div class="dashboard-label">estimated to reach goal</div>
+    </div>
+    <div class="dashboard-card">
+      <div class="dashboard-number" style="font-size:1.8rem">{calc['tdee']}</div>
+      <div class="dashboard-label">maintenance calories</div>
+    </div>
+  </div>
+  <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0">
+    <div class="section-title">Daily macro targets</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px">
+      <div style="text-align:center;padding:12px;background:#f7fafc;border-radius:8px">
+        <div style="font-size:1.5rem;font-weight:700;color:#3182ce">{calc['protein_g']}g</div>
+        <div style="font-size:0.75rem;color:#718096;text-transform:uppercase">Protein</div>
+      </div>
+      <div style="text-align:center;padding:12px;background:#f7fafc;border-radius:8px">
+        <div style="font-size:1.5rem;font-weight:700;color:#e53e3e">{calc['fat_g']}g</div>
+        <div style="font-size:0.75rem;color:#718096;text-transform:uppercase">Fat</div>
+      </div>
+      <div style="text-align:center;padding:12px;background:#f7fafc;border-radius:8px">
+        <div style="font-size:1.5rem;font-weight:700;color:#38a169">{calc['carbs_g']}g</div>
+        <div style="font-size:0.75rem;color:#718096;text-transform:uppercase">Carbs</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-size:0.78rem;color:#718096;text-align:center">
+      BMR: {calc['bmr']} kcal &nbsp;·&nbsp; TDEE: {calc['tdee']} kcal &nbsp;·&nbsp; 
+      Adjustment: {calc['daily_adjustment']:+d} kcal/day
+    </div>
+  </div>
+</div>"""
 
 
 # ── Layout ────────────────────────────────────────────────────────────────────
@@ -501,56 +553,134 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
 
     gr.HTML("""
         <div style="text-align:center;padding:28px 0 12px">
-          <h1 style="font-size:2rem;font-weight:800;color:#1a202c;margin:0">
-            Food Calorie Estimator
-          </h1>
-          <p style="color:#718096;margin:8px 0 0;font-size:1rem">
-            Upload or photograph your meal for instant nutrition analysis
-          </p>
+          <h1 style="font-size:2rem;font-weight:800;color:#1a202c;margin:0">Food Calorie Estimator</h1>
+          <p style="color:#718096;margin:8px 0 0;font-size:1rem">Upload or photograph your meal for instant nutrition analysis</p>
         </div>
     """)
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            input_image = gr.Image(
-                sources=["upload", "webcam"],
-                type="pil",
-                label="Your meal",
-                height=380,
+    with gr.Tabs():
+        with gr.Tab("📷 Analyze"):
+            with gr.Row():
+                with gr.Column(scale=1):
+                    input_image = gr.Image(sources=["upload", "webcam"], type="pil", label="Your meal", height=380)
+                    analyze_btn = gr.Button("Analyze Meal", variant="primary", size="lg")
+                    log_btn     = gr.Button("📋 Log Meal", variant="secondary", size="sm", visible=False)
+                    status_html = gr.HTML("")
+
+                with gr.Column(scale=1):
+                    output_image = gr.Image(label="Detected items", interactive=False, height=380, visible=False)
+
+            with gr.Column(visible=False) as warnings_panel:
+                warnings_html = gr.HTML("")
+
+            with gr.Column(visible=False) as results_panel:
+                results_html = gr.HTML("")
+
+            with gr.Column(visible=False) as vlm_panel:
+                vlm_html = gr.HTML("")
+
+        with gr.Tab("📊 Dashboard"):
+            refresh_btn    = gr.Button("🔄 Refresh", size="sm")
+            dashboard_html = gr.HTML(build_dashboard_html())
+
+        with gr.Tab("👤 Profile"):
+            profile = get_profile()
+
+            gr.HTML("<div style='margin-bottom:16px;font-size:0.9rem;color:#718096'>Set up your profile to get personalized calorie targets.</div>")
+
+            with gr.Row():
+                age_input    = gr.Number(label="Age", value=profile["age"] if profile else 25, precision=0)
+                gender_input = gr.Radio(["Male", "Female"], label="Gender",
+                                        value=profile["gender"] if profile else "Male")
+
+            with gr.Row():
+                height_input = gr.Number(label="Height (cm)", value=profile["height_cm"] if profile else 175, precision=0)
+                weight_input = gr.Number(label="Current weight (kg)", value=profile["current_weight_kg"] if profile else 70)
+
+            with gr.Row():
+                goal_weight_input = gr.Number(label="Goal weight (kg)", value=profile["goal_weight_kg"] if profile else 65)
+                timeframe_input   = gr.Slider(1, 52, value=profile["timeframe_weeks"] if profile else 12,
+                                              step=1, label="Timeframe (weeks)")
+
+            activity_input = gr.Dropdown(
+                list(ACTIVITY_MULTIPLIERS.keys()),
+                label="Activity level",
+                value=profile["activity_level"] if profile else list(ACTIVITY_MULTIPLIERS.keys())[2]
             )
-            analyze_btn = gr.Button("Analyze Meal", variant="primary", size="lg")
-            status_html = gr.HTML("")
 
-        with gr.Column(scale=1):
-            output_image = gr.Image(
-                label="Detected items",
-                interactive=False,
-                height=380,
-                visible=False,
+            save_profile_btn  = gr.Button("💾 Save Profile & Calculate", variant="primary")
+            profile_status    = gr.HTML("")
+            profile_result    = gr.HTML(
+                build_profile_result_html(
+                    calculate_profile(profile["age"], profile["gender"], profile["height_cm"],
+                                      profile["current_weight_kg"], profile["goal_weight_kg"],
+                                      profile["timeframe_weeks"], profile["activity_level"]),
+                    profile
+                ) if profile else ""
             )
 
-    with gr.Column(visible=False) as warnings_panel:
-        warnings_html = gr.HTML("")
-
-    with gr.Column(visible=False) as results_panel:
-        results_html = gr.HTML("")
-
-    with gr.Column(visible=False) as vlm_panel:
-        vlm_html = gr.HTML("")
+            gr.HTML("<div class='section-title' style='margin-top:24px'>Update current weight</div>")
+            with gr.Row():
+                new_weight_input  = gr.Number(label="New weight (kg)", precision=1)
+                update_weight_btn = gr.Button("Update weight", size="sm")
+            update_weight_status = gr.HTML("")
 
     analyze_btn.click(
         fn=analyze_image,
         inputs=[input_image],
         outputs=[
-            output_image,
-            warnings_html,
-            warnings_panel,
-            results_html,
-            results_panel,
-            vlm_html,
-            vlm_panel,
-            status_html,
+            output_image, warnings_html, warnings_panel,
+            results_html, results_panel,
+            vlm_html, vlm_panel,
+            status_html, log_btn,
         ],
+    )
+
+    log_btn.click(
+        fn=do_log_meal,
+        inputs=[],
+        outputs=[status_html, dashboard_html],
+    )
+
+    refresh_btn.click(
+        fn=refresh_dashboard,
+        inputs=[],
+        outputs=[dashboard_html],
+    )
+
+    def on_save_profile(age, gender, height, weight, goal_weight, timeframe, activity):
+        try:
+            calc = save_profile(int(age), gender, float(height), float(weight),
+                                float(goal_weight), int(timeframe), activity)
+            profile = get_profile()
+            return (
+                '<p class="status-success">✓ Profile saved!</p>',
+                build_profile_result_html(calc, profile),
+                build_dashboard_html()
+            )
+        except Exception as e:
+            return f'<p class="status-error">Error: {e}</p>', "", gr.update()
+
+    def on_update_weight(new_weight):
+        try:
+            calc = update_weight(float(new_weight))
+            if not calc:
+                return '<p class="status-error">Set up your profile first.</p>'
+            return f'<p class="status-success">✓ Weight updated! New daily target: {calc["daily_calories"]} kcal</p>'
+        except Exception as e:
+            return f'<p class="status-error">Error: {e}</p>'
+
+    save_profile_btn.click(
+        fn=on_save_profile,
+        inputs=[age_input, gender_input, height_input, weight_input,
+                goal_weight_input, timeframe_input, activity_input],
+        outputs=[profile_status, profile_result, dashboard_html],
+    )
+
+    update_weight_btn.click(
+        fn=on_update_weight,
+        inputs=[new_weight_input],
+        outputs=[update_weight_status],
     )
 
 

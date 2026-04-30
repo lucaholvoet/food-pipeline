@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY db.py .
 COPY profile.py .
+COPY auth.py .
 COPY app.py .
 
 EXPOSE 7860

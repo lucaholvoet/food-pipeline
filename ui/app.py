@@ -10,6 +10,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 from profile import init_profile_db, save_profile, get_profile, update_weight, calculate_profile, ACTIVITY_MULTIPLIERS
 
+from auth import init_auth_db, register_user, login_user
+init_auth_db()
+
 
 init_db()
 init_profile_db()
@@ -565,12 +568,78 @@ def on_update_weight(new_weight, user_id):
         return f'<p class="status-success">✓ Weight updated! New target: {calc["daily_calories"]} kcal</p>'
     except Exception as e:
         return f'<p class="status-error">Error: {e}</p>'
+    
+
+def do_login(username, password):
+    success, result = login_user(username, password)
+    if not success:
+        return (
+            gr.update(),           # current_user unchanged
+            gr.update(),           # auth_panel unchanged
+            gr.update(),           # main_panel unchanged
+            f'<p class="status-error">{result}</p>',
+            gr.update(),
+        )
+    # load profile for welcome message
+    profile = get_profile(result)
+    welcome = f'<div style="text-align:right;padding:4px 0;font-size:0.85rem;color:#718096">Logged in as <strong>{result}</strong></div>'
+    return (
+        result,                                    # current_user = username
+        gr.update(visible=False),                  # hide auth_panel
+        gr.update(visible=True),                   # show main_panel
+        "",                                        # clear login status
+        welcome,                                   # welcome message
+    )
+
+def do_register(username, password, confirm):
+    if password != confirm:
+        return gr.update(), f'<p class="status-error">Passwords do not match.</p>'
+    success, result = register_user(username, password)
+    if not success:
+        return gr.update(), f'<p class="status-error">{result}</p>'
+    return gr.update(), f'<p class="status-success">✓ Account created! Go to Login tab.</p>'
+
+def do_logout():
+    return (
+        "",                       # clear current_user
+        gr.update(visible=True),  # show auth_panel
+        gr.update(visible=False), # hide main_panel
+        "",                       # clear welcome
+    )
+
+def load_dashboard(username):
+    if not username:
+        return ""
+    return build_dashboard_html(username)
+
+def load_profile_tab(username):
+    if not username:
+        return "", gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), ""
+    profile = get_profile(username)
+    result_html = ""
+    if profile:
+        calc = calculate_profile(
+            profile["age"], profile["gender"], profile["height_cm"],
+            profile["current_weight_kg"], profile["goal_weight_kg"],
+            profile["timeframe_weeks"], profile["activity_level"]
+        )
+        result_html = build_profile_result_html(calc, profile)
+    return (
+        result_html,
+        gr.update(value=profile["age"] if profile else 25),
+        gr.update(value=profile["gender"] if profile else "Male"),
+        gr.update(value=profile["height_cm"] if profile else 175),
+        gr.update(value=profile["current_weight_kg"] if profile else 70),
+        gr.update(value=profile["goal_weight_kg"] if profile else 65),
+        gr.update(value=profile["timeframe_weeks"] if profile else 12),
+    )
 
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estimator") as demo:
 
-    user_id_state = gr.BrowserState(generate_user_id())
+    # session state — stores logged-in username, empty string = not logged in
+    current_user = gr.State("")
 
     gr.HTML("""
         <div style="text-align:center;padding:28px 0 12px">
@@ -579,73 +648,113 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
         </div>
     """)
 
-    with gr.Tabs():
-        with gr.Tab("📷 Analyze"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    input_image = gr.Image(sources=["upload", "webcam"], type="pil", label="Your meal", height=380)
-                    analyze_btn = gr.Button("Analyze Meal", variant="primary", size="lg")
-                    log_btn     = gr.Button("📋 Log Meal", variant="secondary", size="sm", visible=False)
-                    status_html = gr.HTML("")
+    # ── Auth panel (shown when not logged in) ─────────────────────────────────
+    with gr.Column(visible=True) as auth_panel:
+        with gr.Tabs():
+            with gr.Tab("🔑 Login"):
+                login_user_input = gr.Textbox(label="Username", placeholder="your username")
+                login_pass_input = gr.Textbox(label="Password", type="password", placeholder="your password")
+                login_btn        = gr.Button("Login", variant="primary")
+                login_status     = gr.HTML("")
 
-                with gr.Column(scale=1):
-                    output_image = gr.Image(label="Detected items", interactive=False, height=380, visible=False)
+            with gr.Tab("📝 Register"):
+                reg_user_input = gr.Textbox(label="Choose a username", placeholder="min 3 characters")
+                reg_pass_input = gr.Textbox(label="Choose a password", type="password", placeholder="min 6 characters")
+                reg_pass_confirm = gr.Textbox(label="Confirm password", type="password")
+                reg_btn        = gr.Button("Create Account", variant="primary")
+                reg_status     = gr.HTML("")
 
-            with gr.Column(visible=False) as warnings_panel:
-                warnings_html = gr.HTML("")
+    # ── Main app (shown when logged in) ──────────────────────────────────────
+    with gr.Column(visible=False) as main_panel:
+        
+        welcome_html = gr.HTML("")
 
-            with gr.Column(visible=False) as results_panel:
-                results_html = gr.HTML("")
+        with gr.Tabs():
+            with gr.Tab("📷 Analyze"):
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        input_image = gr.Image(sources=["upload", "webcam"], type="pil", label="Your meal", height=380)
+                        analyze_btn = gr.Button("Analyze Meal", variant="primary", size="lg")
+                        log_btn     = gr.Button("📋 Log Meal", variant="secondary", size="sm", visible=False)
+                        status_html = gr.HTML("")
 
-            with gr.Column(visible=False) as vlm_panel:
-                vlm_html = gr.HTML("")
+                    with gr.Column(scale=1):
+                        output_image = gr.Image(label="Detected items", interactive=False, height=380, visible=False)
 
-        with gr.Tab("📊 Dashboard"):
-            refresh_btn    = gr.Button("🔄 Refresh", size="sm")
-            dashboard_html = gr.HTML(build_dashboard_html())
+                with gr.Column(visible=False) as warnings_panel:
+                    warnings_html = gr.HTML("")
 
-        with gr.Tab("👤 Profile"):
-            profile = get_profile("default")
+                with gr.Column(visible=False) as results_panel:
+                    results_html = gr.HTML("")
 
-            gr.HTML("<div style='margin-bottom:16px;font-size:0.9rem;color:#718096'>Set up your profile to get personalized calorie targets.</div>")
+                with gr.Column(visible=False) as vlm_panel:
+                    vlm_html = gr.HTML("")
 
-            with gr.Row():
-                age_input    = gr.Number(label="Age", value=profile["age"] if profile else 25, precision=0)
-                gender_input = gr.Radio(["Male", "Female"], label="Gender",
-                                        value=profile["gender"] if profile else "Male")
+            with gr.Tab("📊 Dashboard"):
+                refresh_btn    = gr.Button("🔄 Refresh", size="sm")
+                dashboard_html = gr.HTML("")
 
-            with gr.Row():
-                height_input = gr.Number(label="Height (cm)", value=profile["height_cm"] if profile else 175, precision=0)
-                weight_input = gr.Number(label="Current weight (kg)", value=profile["current_weight_kg"] if profile else 70)
+            with gr.Tab("👤 Profile"):
+                profile_intro = gr.HTML("<div style='margin-bottom:16px;font-size:0.9rem;color:#718096'>Set up your profile to get personalized calorie targets.</div>")
 
-            with gr.Row():
-                goal_weight_input = gr.Number(label="Goal weight (kg)", value=profile["goal_weight_kg"] if profile else 65)
-                timeframe_input   = gr.Slider(1, 52, value=profile["timeframe_weeks"] if profile else 12,
-                                              step=1, label="Timeframe (weeks)")
+                with gr.Row():
+                    age_input    = gr.Number(label="Age", value=25, precision=0)
+                    gender_input = gr.Radio(["Male", "Female"], label="Gender", value="Male")
 
-            activity_input = gr.Dropdown(
-                list(ACTIVITY_MULTIPLIERS.keys()),
-                label="Activity level",
-                value=profile["activity_level"] if profile else list(ACTIVITY_MULTIPLIERS.keys())[2]
-            )
+                with gr.Row():
+                    height_input = gr.Number(label="Height (cm)", value=175, precision=0)
+                    weight_input = gr.Number(label="Current weight (kg)", value=70)
 
-            save_profile_btn  = gr.Button("💾 Save Profile & Calculate", variant="primary")
-            profile_status    = gr.HTML("")
-            profile_result    = gr.HTML(
-                build_profile_result_html(
-                    calculate_profile(profile["age"], profile["gender"], profile["height_cm"],
-                                      profile["current_weight_kg"], profile["goal_weight_kg"],
-                                      profile["timeframe_weeks"], profile["activity_level"]),
-                    profile
-                ) if profile else ""
-            )
+                with gr.Row():
+                    goal_weight_input = gr.Number(label="Goal weight (kg)", value=65)
+                    timeframe_input   = gr.Slider(1, 52, value=12, step=1, label="Timeframe (weeks)")
 
-            gr.HTML("<div class='section-title' style='margin-top:24px'>Update current weight</div>")
-            with gr.Row():
-                new_weight_input  = gr.Number(label="New weight (kg)", precision=1)
-                update_weight_btn = gr.Button("Update weight", size="sm")
-            update_weight_status = gr.HTML("")
+                activity_input = gr.Dropdown(
+                    list(ACTIVITY_MULTIPLIERS.keys()),
+                    label="Activity level",
+                    value=list(ACTIVITY_MULTIPLIERS.keys())[2]
+                )
 
+                save_profile_btn  = gr.Button("💾 Save Profile & Calculate", variant="primary")
+                profile_status    = gr.HTML("")
+                profile_result    = gr.HTML("")
+
+                gr.HTML("<div class='section-title' style='margin-top:24px'>Update current weight</div>")
+                with gr.Row():
+                    new_weight_input  = gr.Number(label="New weight (kg)", precision=1)
+                    update_weight_btn = gr.Button("Update weight", size="sm")
+                update_weight_status = gr.HTML("")
+
+            with gr.Tab("🚪 Logout"):
+                logout_btn = gr.Button("Logout", variant="stop")
+
+    # Auth handlers
+    login_btn.click(
+        fn=do_login,
+        inputs=[login_user_input, login_pass_input],
+        outputs=[current_user, auth_panel, main_panel, login_status, welcome_html],
+    )
+
+    reg_btn.click(
+        fn=do_register,
+        inputs=[reg_user_input, reg_pass_input, reg_pass_confirm],
+        outputs=[current_user, reg_status],
+    )
+
+    logout_btn.click(
+        fn=do_logout,
+        inputs=[],
+        outputs=[current_user, auth_panel, main_panel, welcome_html],
+    )
+
+    # Load dashboard when tab is opened
+    refresh_btn.click(
+        fn=load_dashboard,
+        inputs=[current_user],
+        outputs=[dashboard_html],
+    )
+
+    # Analyze
     analyze_btn.click(
         fn=analyze_image,
         inputs=[input_image],
@@ -659,26 +768,20 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
 
     log_btn.click(
         fn=do_log_meal,
-        inputs=[user_id_state],
+        inputs=[current_user],
         outputs=[status_html, dashboard_html],
-    )
-
-    refresh_btn.click(
-        fn=refresh_dashboard,
-        inputs=[user_id_state],
-        outputs=[dashboard_html],
     )
 
     save_profile_btn.click(
         fn=on_save_profile,
         inputs=[age_input, gender_input, height_input, weight_input,
-                goal_weight_input, timeframe_input, activity_input, user_id_state],
+                goal_weight_input, timeframe_input, activity_input, current_user],
         outputs=[profile_status, profile_result, dashboard_html],
     )
 
     update_weight_btn.click(
         fn=on_update_weight,
-        inputs=[new_weight_input, user_id_state],
+        inputs=[new_weight_input, current_user],
         outputs=[update_weight_status],
     )
 

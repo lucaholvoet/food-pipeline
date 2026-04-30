@@ -33,7 +33,17 @@ class FoodPipeline:
         print("Loading classifier...")
         self.classifier = FoodClassifier(classifier_path, labels_path, device=device)
         print("Loading portion estimator...")
+
         self.portion = PortionEstimator()
+        # MiDaS depth estimator (optional — graceful fallback if unavailable)
+        try:
+            from portion.depth_estimator import DepthEstimator
+            self.depth_estimator = DepthEstimator()
+            print("MiDaS depth estimator ready.")
+        except Exception as e:
+            print(f"MiDaS not available: {e}. Using density table only.")
+            self.depth_estimator = None
+
         print("Loading nutrition lookup...")
         self.nutrition = NutritionLookup(index_path, records_path, device=device)
 
@@ -89,6 +99,14 @@ class FoodPipeline:
                 plate_detected=plate_detected,
                 processing_time_ms=int((time.time() - start_time) * 1000)
             )
+        
+        # MiDaS depth map
+        depth_map = None
+        if self.depth_estimator is not None:
+            try:
+                depth_map = self.depth_estimator.get_depth_map(image)
+            except Exception as e:
+                warnings.append(f"depth_estimation_failed: {str(e)}")
 
         # Compute scale
         scale_cm_per_px = 0.0
@@ -116,7 +134,7 @@ class FoodPipeline:
             confidence_scores.append(detection_conf)
 
             # Portion
-            portion_result = self.portion.estimate(top_label, mask, plate_mask)
+            portion_result = self.portion.estimate(top_label, mask, plate_mask, depth_map=depth_map)
             grams = portion_result["estimated_grams"]
             portion_method = portion_result["portion_method"]
 

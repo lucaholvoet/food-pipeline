@@ -118,15 +118,8 @@ class PortionEstimator:
         self.plate_diameter_cm = plate_diameter_cm
 
     def estimate(self, food_label: str, mask: np.ndarray,
-                 plate_mask: np.ndarray = None):
-        """
-        Input:
-            food_label   : Food-101 class name e.g. 'fried_rice'
-            mask         : binary numpy array (H x W) for the food item
-            plate_mask   : binary numpy array (H x W) for the plate (optional)
-        Output:
-            dict with estimated_grams and portion_method
-        """
+                 plate_mask: np.ndarray = None, depth_map: np.ndarray = None):
+
         food_px = float(mask.sum())
 
         if plate_mask is not None and plate_mask.sum() > 0:
@@ -142,12 +135,24 @@ class PortionEstimator:
         food_area_cm2 = food_px * (cm_per_px ** 2)
 
         props = self.density_table.get(food_label, DEFAULT_DENSITY)
-        height_cm = props["height_cm"]
         density = props["density_g_cm3"]
+
+        # Use MiDaS depth if available, otherwise fall back to density table height
+        if depth_map is not None and depth_map.shape == mask.shape:
+            food_depths = depth_map[mask > 0]
+            if len(food_depths) > 0:
+                # relative height: difference between food surface and background
+                height_relative = float(food_depths.mean() - food_depths.min())
+                # scale relative depth to cm (calibrated: 1.0 relative ~ 8cm max height)
+                height_cm = max(0.5, min(height_relative * 8.0, 20.0))
+                portion_method = portion_method + "_midas"
+            else:
+                height_cm = props["height_cm"]
+        else:
+            height_cm = props["height_cm"]
 
         volume_cm3 = food_area_cm2 * height_cm
         grams = volume_cm3 * density
-
         grams = max(10.0, min(grams, 1500.0))
 
         return {
@@ -155,7 +160,7 @@ class PortionEstimator:
             "portion_method": portion_method,
             "debug": {
                 "food_area_cm2": round(food_area_cm2, 2),
-                "height_cm": height_cm,
+                "height_cm": round(height_cm, 2),
                 "density_g_cm3": density,
                 "cm_per_px": round(cm_per_px, 5)
             }

@@ -3,12 +3,15 @@ import json
 import requests
 from io import BytesIO
 from datetime import date
-from db import init_db, log_meal, get_today_meals, get_today_totals, get_weekly_data, delete_meal, generate_user_id
-
 import gradio as gr
 from PIL import Image, ImageDraw, ImageFont
 
-from profile import init_profile_db, save_profile, get_profile, update_weight, calculate_profile, ACTIVITY_MULTIPLIERS
+from profile import (init_profile_db, save_profile, get_profile,
+                     update_weight, calculate_profile, ACTIVITY_MULTIPLIERS,
+                     weeks_until)
+from db import (init_db, log_meal, get_today_meals, get_today_totals,
+                get_weekly_data, get_meals_for_date, get_totals_for_date,
+                delete_meal, generate_user_id)
 
 from auth import init_auth_db, register_user, login_user
 init_auth_db()
@@ -312,15 +315,28 @@ def build_vlm_panel(data):
 def build_dashboard_html(user_id: str = "default"):
     today_totals = get_today_totals(user_id)
     today_meals  = get_today_meals(user_id)
-    weekly       = get_weekly_data(user_id)
+    weekly       = get_weekly_data(user_id)  # now (iso_date, label, calories)
     profile      = get_profile(user_id)
 
-    calories_eaten  = today_totals["calories_kcal"]
-    daily_target    = profile["daily_calories"] if profile else 2000
-    calories_left   = max(0, daily_target - calories_eaten)
-    progress_pct    = min(100, int((calories_eaten / daily_target) * 100)) if daily_target else 0
-    bar_color       = "#e53e3e" if progress_pct > 100 else "#f8b500"
-    count           = today_totals["meal_count"]
+    calories_eaten = today_totals["calories_kcal"]
+    daily_target   = profile["daily_calories"] if profile else 2000
+    calories_left  = max(0, daily_target - calories_eaten)
+    progress_pct   = min(100, int((calories_eaten / daily_target) * 100)) if daily_target else 0
+    bar_color      = "#e53e3e" if progress_pct > 100 else "#f8b500"
+    count          = today_totals["meal_count"]
+
+    # goal date progress
+    goal_info = ""
+    if profile and profile.get("goal_date"):
+        goal_date = date.fromisoformat(profile["goal_date"])
+        days_left = (goal_date - date.today()).days
+        goal_str  = goal_date.strftime("%d %b %Y")
+        if days_left > 0:
+            goal_info = f'<div style="font-size:0.78rem;color:#a0aec0;margin-top:8px">🎯 Goal date: <strong style="color:#f8b500">{goal_str}</strong> — {days_left} days remaining</div>'
+        elif days_left == 0:
+            goal_info = f'<div style="font-size:0.78rem;color:#48bb78;margin-top:8px">🎉 Goal date is today! ({goal_str})</div>'
+        else:
+            goal_info = f'<div style="font-size:0.78rem;color:#e53e3e;margin-top:8px">⚠ Goal date passed ({goal_str})</div>'
 
     summary = f"""
 <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
@@ -344,18 +360,13 @@ def build_dashboard_html(user_id: str = "default"):
     <div style="text-align:center"><div style="font-weight:700">{today_totals['carbs_g']:.0f}g</div><div style="font-size:0.68rem;color:#a0aec0">CARBS</div></div>
     <div style="text-align:center"><div style="font-weight:700">{count}</div><div style="font-size:0.68rem;color:#a0aec0">MEALS</div></div>
   </div>
+  {goal_info}
 </div>"""
-    
-    # weekly bar chart
-    max_cal = max((c for _, c in weekly), default=1) or 1
-    days_short = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+
+    # weekly bar chart — now uses label with date
+    max_cal = max((c for _, _, c in weekly), default=1) or 1
     bars = ""
-    for day_str, cal_val in weekly:
-        try:
-            d = date.fromisoformat(day_str)
-            label = "Today" if d == date.today() else days_short[d.weekday()]
-        except Exception:
-            label = day_str
+    for iso_date, label, cal_val in weekly:
         pct = int((cal_val / max_cal) * 100)
         bars += f"""
 <div style="margin-bottom:10px">
@@ -373,7 +384,8 @@ def build_dashboard_html(user_id: str = "default"):
 {bars}
 </div>"""
 
-    # today's meals list
+    # today's meals list with full date
+    today_str = date.today().strftime("%A %d %B %Y")
     if today_meals:
         meal_rows = ""
         for m in today_meals:
@@ -388,9 +400,9 @@ def build_dashboard_html(user_id: str = "default"):
     <div style="font-weight:700;color:#f8b500">{m["calories_kcal"]:.0f} kcal</div>
   </div>
 </div>"""
-        meals_section = f'<div class="section-title">Today\'s meals</div><div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0">{meal_rows}</div>'
+        meals_section = f'<div class="section-title">Today\'s meals — {today_str}</div><div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0">{meal_rows}</div>'
     else:
-        meals_section = '<div style="color:#718096;text-align:center;padding:24px">No meals logged today. Analyze a meal and click Log Meal!</div>'
+        meals_section = f'<div style="color:#718096;text-align:center;padding:24px">No meals logged today ({today_str}). Analyze a meal and click Log Meal!</div>'
 
     return summary + weekly_section + meals_section
 
@@ -503,6 +515,12 @@ def build_profile_result_html(calc, profile):
     arrow = "↓" if calc["weekly_change_kg"] < 0 else "↑"
     color = "#48bb78" if direction == "lose" else "#f6ad55"
 
+    goal_date = calc.get("goal_date", "")
+    try:
+        goal_display = date.fromisoformat(goal_date).strftime("%d %b %Y")
+    except Exception:
+        goal_display = goal_date
+
     return f"""
 <div style="margin-top:16px">
   <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px">
@@ -515,8 +533,8 @@ def build_profile_result_html(calc, profile):
       <div class="dashboard-label">expected per week</div>
     </div>
     <div class="dashboard-card">
-      <div class="dashboard-number" style="font-size:1.8rem">{calc['est_weeks']}w</div>
-      <div class="dashboard-label">estimated to reach goal</div>
+      <div class="dashboard-number" style="font-size:1.4rem">{goal_display}</div>
+      <div class="dashboard-label">goal date ({calc['timeframe_weeks']}w away)</div>
     </div>
     <div class="dashboard-card">
       <div class="dashboard-number" style="font-size:1.8rem">{calc['tdee']}</div>
@@ -546,10 +564,15 @@ def build_profile_result_html(calc, profile):
   </div>
 </div>"""
 
-def on_save_profile(age, gender, height, weight, goal_weight, timeframe, activity, user_id):
+def on_save_profile(age, gender, height, weight, goal_weight, goal_date, activity, user_id):
+    # validate date format
+    try:
+        date.fromisoformat(goal_date)
+    except ValueError:
+        return '<p class="status-error">Invalid date format. Use YYYY-MM-DD (e.g. 2025-12-31)</p>', "", gr.update()
     try:
         calc = save_profile(int(age), gender, float(height), float(weight),
-                            float(goal_weight), int(timeframe), activity,
+                            float(goal_weight), goal_date, activity,
                             user_id=user_id)
         profile = get_profile(user_id)
         return (
@@ -621,7 +644,8 @@ def load_profile_tab(username):
         calc = calculate_profile(
             profile["age"], profile["gender"], profile["height_cm"],
             profile["current_weight_kg"], profile["goal_weight_kg"],
-            profile["timeframe_weeks"], profile["activity_level"]
+            profile.get("goal_date") or (date.today().replace(year=date.today().year + 1)).isoformat(),
+            profile["activity_level"]
         )
         result_html = build_profile_result_html(calc, profile)
     return (
@@ -631,7 +655,7 @@ def load_profile_tab(username):
         gr.update(value=profile["height_cm"] if profile else 175),
         gr.update(value=profile["current_weight_kg"] if profile else 70),
         gr.update(value=profile["goal_weight_kg"] if profile else 65),
-        gr.update(value=profile["timeframe_weeks"] if profile else 12),
+        gr.update(value=profile.get("goal_date") if profile else (date.today().replace(year=date.today().year + 1)).isoformat()),
     )
 
 # ── Layout ────────────────────────────────────────────────────────────────────
@@ -707,7 +731,11 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
 
                 with gr.Row():
                     goal_weight_input = gr.Number(label="Goal weight (kg)", value=65)
-                    timeframe_input   = gr.Slider(1, 52, value=12, step=1, label="Timeframe (weeks)")
+                    goal_date_input   = gr.Textbox(
+                        label="Goal date (YYYY-MM-DD)",
+                        placeholder="e.g. 2025-12-31",
+                        value=(date.today().replace(year=date.today().year + 1)).isoformat()
+                    )
 
                 activity_input = gr.Dropdown(
                     list(ACTIVITY_MULTIPLIERS.keys()),
@@ -715,9 +743,9 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
                     value=list(ACTIVITY_MULTIPLIERS.keys())[2]
                 )
 
-                save_profile_btn  = gr.Button("💾 Save Profile & Calculate", variant="primary")
-                profile_status    = gr.HTML("")
-                profile_result    = gr.HTML("")
+                save_profile_btn = gr.Button("💾 Save Profile & Calculate", variant="primary")
+                profile_status   = gr.HTML("")
+                profile_result   = gr.HTML("")
 
                 gr.HTML("<div class='section-title' style='margin-top:24px'>Update current weight</div>")
                 with gr.Row():
@@ -775,9 +803,9 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
     save_profile_btn.click(
         fn=on_save_profile,
         inputs=[age_input, gender_input, height_input, weight_input,
-                goal_weight_input, timeframe_input, activity_input, current_user],
+                    goal_weight_input, goal_date_input, activity_input, current_user],
         outputs=[profile_status, profile_result, dashboard_html],
-    )
+        )
 
     update_weight_btn.click(
         fn=on_update_weight,

@@ -119,7 +119,7 @@ def chat_correction(history: list, user_message: str, pipeline_data: dict) -> tu
     messages.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash-lite-preview-06-17",
         config=types.GenerateContentConfig(system_instruction=system),
         contents=messages,
     )
@@ -153,7 +153,7 @@ def chat_manual(history: list, user_message: str, default_date: str) -> tuple[li
     messages.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash-lite-preview-06-17",
         config=types.GenerateContentConfig(system_instruction=system),
         contents=messages,
     )

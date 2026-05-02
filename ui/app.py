@@ -494,7 +494,8 @@ def analyze_image(input_image):
         gr.update(value=vlm_html),
         gr.update(visible=vlm),
         "",
-        gr.update(visible=True),  # show log button
+        gr.update(visible=True),  
+        gr.update(visible=True),
     )
 
 

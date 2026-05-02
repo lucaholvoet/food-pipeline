@@ -434,18 +434,7 @@ def _empty_return(msg=""):
 
 def analyze_image(input_image):
     if input_image is None:
-        return (
-        gr.update(value=annotated, visible=annotated is not None),
-        gr.update(value=w_html),
-        gr.update(visible=bool(warnings)),
-        gr.update(value=results_html),
-        gr.update(visible=True),
-        gr.update(value=vlm_html),
-        gr.update(visible=vlm),
-        "",
-        gr.update(visible=True),   # log_btn
-        gr.update(visible=True),   # disagree_btn
-        )
+        return _empty_return("Please upload or capture an image first.")
 
     buf = BytesIO()
     input_image.save(buf, format="JPEG", quality=92)

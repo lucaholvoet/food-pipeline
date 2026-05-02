@@ -1,155 +1,217 @@
-# Food Calorie & Nutrient Estimator — CV Pipeline
+# 🍽️ Food Calorie & Nutrient Estimator
 
-AI-powered food detection and nutrition estimation pipeline.
-Part of a larger hybrid CV + VLM system for meal logging and calorie tracking.
+A full-stack AI-powered food calorie estimation system. Take a photo of your meal and get instant per-item nutritional analysis — calories, protein, fat, carbs, and fiber. Built with computer vision, deep learning, and LLM refinement.
+
+**Live demo:** [http://65.109.133.173:7860](http://65.109.133.173:7860)
+
+---
+
+## Pipeline Overview
+
+```
+Photo → YOLOv8 Detection → EfficientNet-B0 Classification → MiDaS Depth
+      → Portion Estimation → USDA FAISS Lookup → Gemini Flash Refinement
+      → Nutrition Output
+```
+
+---
+
+## Features
+
+### CV Pipeline
+- **Food detection** — YOLOv8n-seg trained on FoodSeg103 (mAP50: 0.934)
+- **Food classification** — EfficientNet-B0 fine-tuned on Food-101 (87.37% accuracy, 101 classes)
+- **Depth estimation** — MiDaS_small for height-based volume estimation
+- **Portion estimation** — plate reference scale + MiDaS depth + per-food density table
+- **Nutrition lookup** — FAISS semantic search over 9,013 USDA food database entries
+
+### VLM Refinement
+- **Gemini Flash** via Google AI Studio
+- Triggers when CV confidence < 70% or no plate detected
+- Corrects food labels, re-estimates portions, recalculates nutrition
+- Shows CV → VLM confidence comparison per item
+
+### App Features
+- 🔐 **User accounts** — register/login with hashed passwords, per-user data
+- 📋 **Meal logging** — log from CV result, VLM result, AI correction, or manual entry
+- 💬 **AI correction chat** — disagree with the pipeline result and correct it via chat
+- ✏️ **Manual logging** — describe what you ate in natural language, Gemini estimates nutrition
+- 📊 **Dashboard** — daily calories vs target, 7-day bar chart with dates, meals list
+- 👤 **Profile** — BMR/TDEE calculation, goal date picker, personalized calorie targets
+- 🌐 **Deployed** — accessible from any device, anywhere
+
+---
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Detection | YOLOv8n-seg (Ultralytics) |
+| Classification | EfficientNet-B0 (timm) |
+| Depth estimation | MiDaS_small (torch.hub) |
+| Nutrition lookup | FAISS + sentence-transformers |
+| VLM refinement | Gemini Flash (Google AI Studio) |
+| Chat logging | Gemini 2.5 Flash Lite |
+| API | FastAPI |
+| Frontend | Gradio 5.29.0 |
+| Database | SQLite |
+| Deployment | Docker + Hetzner CX23 |
+
+---
 
 ## Project Structure
 
 ```
 food-pipeline/
-├── classifier/        # EfficientNet-B0 food classifier (Food-101)
-├── detector/          # YOLOv8n-seg food detection & segmentation
-├── portion/           # Portion size estimator (geometry + density lookup)
-├── nutrition/         # USDA FAISS nutrition lookup
-├── api/               # FastAPI endpoint
-├── tests/             # Test suite
-├── scripts/           # Utility scripts (build index, tests)
-├── data/              # Local data (not tracked by git)
-├── models/            # Model weights (not tracked by git)
-└── notebooks/         # Colab training notebooks
+├── pipeline.py                  # Main orchestrator
+├── api/
+│   ├── main.py                  # FastAPI POST /analyze endpoint
+│   └── models.py                # CVPipelineOutput Pydantic model
+├── detector/
+│   └── detector.py              # YOLOv8n-seg wrapper
+├── classifier/
+│   └── classifier.py            # EfficientNet-B0 wrapper
+├── portion/
+│   ├── portion.py               # Portion estimator (plate + MiDaS + density)
+│   └── depth_estimator.py       # MiDaS_small wrapper
+├── nutrition/
+│   └── nutrition.py             # FAISS USDA lookup
+├── vlm/
+│   ├── refiner.py               # VLMRefiner — calls Gemini Flash
+│   ├── schemas.py               # Pydantic schemas (VLMRequest, VLMResponse)
+│   └── client.py                # google-genai SDK client
+├── ui/
+│   ├── app.py                   # Gradio frontend
+│   ├── db.py                    # SQLite meal logging
+│   ├── profile.py               # BMR/TDEE/calorie target calculation
+│   ├── auth.py                  # Login/register with SHA256+salt
+│   ├── llm_chat.py              # Gemini chat for correction + manual logging
+│   ├── Dockerfile
+│   └── requirements.txt
+├── models/                      # Model weights (not in git — see setup)
+│   ├── yolov8n_food_best.pt
+│   ├── efficientnet_b0_food101_best.pt
+│   └── idx_to_class.json
+├── nutrition/                   # USDA index (not in git — see setup)
+│   ├── usda.index
+│   └── usda_records.json
+├── Dockerfile
+└── docker-compose.yml
 ```
+
+---
 
 ## Setup
 
+### Prerequisites
+- Docker Desktop
+- Google AI Studio API key ([get one here](https://ai.google.dev/gemini-api/docs/api-key))
+
+### 1. Clone the repo
 ```bash
-# Clone the repo
 git clone https://github.com/lucaholvoet/food-pipeline.git
 cd food-pipeline
-
-# Create virtual environment
-python -m venv venv
-
-# Activate (Windows)
-venv\Scripts\activate
-
-# Install dependencies
-pip install torch==2.2.2 torchvision==0.17.2 --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt
 ```
 
-## Pipeline Overview
-
+### 2. Get model weights
+The model weights are not in git (too large). You need:
 ```
-Image Input
-    ↓
-YOLOv8n-seg          → detects food regions + plate, outputs masks + bboxes
-    ↓
-EfficientNet-B0      → classifies each food crop (Food-101, 101 classes)
-    ↓
-Portion Estimator    → mask area + plate reference → estimated grams
-    ↓
-USDA FAISS Lookup    → food name → calories + protein + fat + carbs + fiber
-    ↓
-JSON Output          → per-item + totals, confidence scores, VLM trigger flag
+models/yolov8n_food_best.pt
+models/efficientnet_b0_food101_best.pt
+models/idx_to_class.json
+nutrition/usda.index
+nutrition/usda_records.json
+```
+Contact the team for access or download links.
+
+### 3. Create `.env` file
+```bash
+echo "GOOGLE_API_KEY=your_key_here" > .env
 ```
 
-## JSON Output Schema
+### 4. Run
+```bash
+docker-compose up --build
+```
 
+Open [http://localhost:7860](http://localhost:7860)
+
+---
+
+## API
+
+### `POST /analyze`
+Send a food image, get back nutrition analysis.
+
+```bash
+curl -X POST http://localhost:8000/analyze \
+  -F "file=@meal.jpg"
+```
+
+**Response** (CV result):
 ```json
 {
-  "image_id": "uuid-string",
+  "image_id": "uuid",
   "status": "success",
-  "warnings": [],
-  "requires_vlm_refinement": false,
-  "average_confidence": 0.84,
+  "average_confidence": 0.87,
   "plate_detected": true,
-  "scale_cm_per_px": 0.043,
   "items": [
     {
       "item_id": 1,
-      "food_name": "fried_rice",
-      "display_name": "Fried rice",
-      "classification_confidence": 0.91,
-      "detection_confidence": 0.87,
-      "top3_predictions": [
-        {"label": "fried_rice", "confidence": 0.91},
-        {"label": "risotto", "confidence": 0.06},
-        {"label": "pilaf", "confidence": 0.03}
-      ],
-      "estimated_grams": 185,
-      "portion_method": "plate_reference",
-      "bbox": [120, 45, 380, 310],
-      "nutrition_per_100g": {
-        "calories_kcal": 163,
-        "protein_g": 3.5,
-        "fat_g": 4.9,
-        "carbs_g": 26.6,
-        "fiber_g": 0.6
-      },
+      "display_name": "Hamburger",
+      "estimated_grams": 250,
+      "portion_method": "plate_reference_midas",
+      "classification_confidence": 0.87,
       "nutrition_total": {
-        "calories_kcal": 302,
-        "protein_g": 6.5,
-        "fat_g": 9.1,
-        "carbs_g": 49.2,
-        "fiber_g": 1.1
+        "calories_kcal": 625,
+        "protein_g": 32.5,
+        "fat_g": 30.0,
+        "carbs_g": 60.0,
+        "fiber_g": 4.8
       }
     }
   ],
-  "totals": {
-    "calories_kcal": 302,
-    "protein_g": 6.5,
-    "fat_g": 9.1,
-    "carbs_g": 49.2,
-    "fiber_g": 1.1
-  },
-  "processing_time_ms": 1840
+  "totals": { "calories_kcal": 625, "protein_g": 32.5, "fat_g": 30.0, "carbs_g": 60.0, "fiber_g": 4.8 },
+  "processing_time_ms": 1243
 }
 ```
 
-## Rebuilding the USDA Index
+When VLM refinement triggers, response includes `refinement_status` and per-item `action` (corrected/confirmed).
 
-The FAISS index is not tracked by git. After cloning, rebuild it:
-
-```bash
-# Download USDA FoodData Central CSVs from:
-# https://fdc.nal.usda.gov/download-datasets.html
-# Place Foundation Foods in: data/usda/foundation/
-# Place SR Legacy in:        data/usda/sr_legacy/
-
-python scripts/build_usda_index.py
-```
-
-## Running Tests
-
-```bash
-python scripts/test_nutrition.py
-python scripts/test_portion.py
-python scripts/test_full_nutrition_portion.py
-```
-
-## Model Weights
-
-Model weights are not tracked by git.
-After training completes on Colab, download from Google Drive and place in:
-
-```
-models/efficientnet_b0_food101_best.pt
-models/classifier/idx_to_class.json
-```
+---
 
 ## Team
 
-- **Emiel & Luca** — CV pipeline (this repo)
-- **Mahesh & Furaha** — VLM refinement stage
+| Name | Role |
+|------|------|
+| Emiel | CV pipeline — YOLOv8, EfficientNet-B0, portion estimation |
+| Luca | CV pipeline — MiDaS, FAISS, FastAPI, UI, deployment |
+| Mahesh | VLM refinement — Gemini Flash integration, schema design |
+| Furaha | VLM refinement — prompt engineering, evaluation |
 
-The CV pipeline outputs a JSON that the VLM stage receives.
-`requires_vlm_refinement: true` is set when average confidence < threshold (TBD with VLM team).
+---
 
-## Progress
+## Known Limitations
 
-- [x] Phase 1 — Environment & project setup
-- [x] Phase 4A — Portion estimator
-- [x] Phase 4B — USDA FAISS nutrition lookup
-- [ ] Phase 2 — EfficientNet-B0 classifier (training in progress on Colab)
-- [ ] Phase 3 — YOLOv8n-seg detector
-- [ ] Phase 5 — Pipeline integration & FastAPI
+- **Portion accuracy** — MiDaS calibration in progress using Nutrition5k dataset. Current multiplier (8.0) is a rough estimate.
+- **101 food classes** — EfficientNet-B0 is limited to Food-101 classes. Many home-cooked foods not covered.
+- **No GPU** — inference runs on CPU (~1-2 seconds). Server has no GPU.
+- **USDA coverage** — 9,013 entries. Branded and specialty foods often not found.
+- **Login session** — Gradio `gr.State` resets on page reload. Users must log in again after closing the browser.
+
+---
+
+## Roadmap
+
+- [ ] MiDaS calibration via Nutrition5k (notebook in `/scripts/`)
+- [ ] Expand USDA to Branded Foods (400k+ entries)
+- [ ] Custom food entries per user
+- [ ] PWA — installable on phone home screen
+- [ ] Retrain classifier with more food classes
+- [ ] Persistent login session
+
+---
+
+## License
+
+For academic use only.

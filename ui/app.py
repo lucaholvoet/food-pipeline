@@ -14,6 +14,9 @@ from db import (init_db, log_meal, get_today_meals, get_today_totals,
                 delete_meal, generate_user_id)
 
 from auth import init_auth_db, register_user, login_user
+
+from llm_chat import chat_correction, chat_manual, MAX_TURNS
+
 init_auth_db()
 
 
@@ -424,13 +427,25 @@ def _empty_return(msg=""):
         gr.update(value=""),
         hidden,
         status,
-        gr.update(visible=False),
+        gr.update(visible=False),  # log_btn
+        gr.update(visible=False),  # disagree_btn
     )
 
 
 def analyze_image(input_image):
     if input_image is None:
-        return _empty_return("Please upload or capture an image first.")
+        return (
+        gr.update(value=annotated, visible=annotated is not None),
+        gr.update(value=w_html),
+        gr.update(visible=bool(warnings)),
+        gr.update(value=results_html),
+        gr.update(visible=True),
+        gr.update(value=vlm_html),
+        gr.update(visible=vlm),
+        "",
+        gr.update(visible=True),   # log_btn
+        gr.update(visible=True),   # disagree_btn
+        )
 
     buf = BytesIO()
     input_image.save(buf, format="JPEG", quality=92)
@@ -658,12 +673,234 @@ def load_profile_tab(username):
         gr.update(value=profile.get("goal_date") if profile else (date.today().replace(year=date.today().year + 1)).isoformat()),
     )
 
+# ── LLM Chat callbacks ────────────────────────────────────────────────────────
+
+def open_correction_chat(user_id):
+    """Open the correction chat panel with initial message."""
+    data = _last_result.get("data")
+    if not data:
+        return (
+            gr.update(visible=False),
+            [],
+            gr.update(value=""),
+        )
+    items = data.get("items", [])
+    is_vlm = is_vlm_response(data)
+
+    # Build summary for first message
+    lines = ["I see the pipeline detected:"]
+    for item in items:
+        if is_vlm:
+            name = item.get("refined", {}).get("display_name", "Unknown")
+            grams = item.get("portion", {}).get("estimated_grams", 0)
+        else:
+            name = item.get("display_name", "Unknown")
+            grams = item.get("estimated_grams", 0)
+        lines.append(f"• {name} ({grams:.0f}g)")
+    lines.append("\nWhat would you like to change?")
+
+    initial_msg = "\n".join(lines)
+    history = [{"role": "assistant", "content": initial_msg}]
+
+    return (
+        gr.update(visible=True),
+        history,
+        gr.update(value=_history_to_html(history)),
+    )
+
+def send_correction_message(user_message, history, user_id):
+    """Send a message in the correction chat."""
+    if not user_message.strip():
+        return history, gr.update(), gr.update(visible=False), gr.update(value="")
+
+    data = _last_result.get("data")
+    if not data:
+        return history, gr.update(), gr.update(visible=False), gr.update(value="")
+
+    # Check turn limit
+    user_turns = sum(1 for m in history if m["role"] == "user")
+    if user_turns >= MAX_TURNS:
+        history = history + [{"role": "assistant", "content": "We've reached the maximum number of exchanges. Please confirm what you'd like to log or start over."}]
+        return history, gr.update(value=_history_to_html(history)), gr.update(visible=False), gr.update(value="")
+
+    try:
+        new_history, log_data = chat_correction(history, user_message, data)
+    except Exception as e:
+        new_history = history + [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": f"Sorry, I had an error: {str(e)}"}
+        ]
+        log_data = None
+
+    show_confirm = log_data is not None
+    confirm_html = ""
+    if log_data:
+        t = log_data.get("totals", {})
+        confirm_html = f"""
+<div style="background:#f0fff4;border:2px solid #48bb78;border-radius:12px;padding:16px;margin-top:8px">
+  <div style="font-weight:700;color:#276749;margin-bottom:8px">✓ Ready to log: {log_data.get('meal_name', 'Meal')}</div>
+  <div style="font-size:0.85rem;color:#4a5568">{log_data.get('items_description', '')}</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
+    <div style="text-align:center"><div style="font-weight:700;color:#f8b500">{t.get('calories_kcal', 0):.0f}</div><div style="font-size:0.7rem;color:#718096">KCAL</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{t.get('protein_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">PROTEIN</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{t.get('fat_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">FAT</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{t.get('carbs_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">CARBS</div></div>
+  </div>
+</div>"""
+
+    return (
+        new_history,
+        gr.update(value=_history_to_html(new_history)),
+        gr.update(visible=show_confirm, value=confirm_html),
+        gr.update(value=""),
+    )
+
+def confirm_correction_log(history, user_id):
+    """Log the corrected meal from chat."""
+    data = _last_result.get("data")
+    # Find the last log_data in history
+    for msg in reversed(history):
+        if msg["role"] == "assistant":
+            from llm_chat import _extract_log_data
+            log_data = _extract_log_data(msg["content"])
+            if log_data:
+                totals = log_data.get("totals", {})
+                meal_name = log_data.get("meal_name", "Corrected meal")
+                log_meal(totals, [], user_id=user_id, source="llm_correction", meal_name=meal_name)
+                return (
+                    gr.update(visible=False),   # hide chat panel
+                    [],                          # clear history
+                    gr.update(value=""),         # clear chat display
+                    gr.update(visible=False),    # hide confirm
+                    '<p class="status-success">✓ Corrected meal logged!</p>',
+                    build_dashboard_html(user_id),
+                )
+    return gr.update(), history, gr.update(), gr.update(), gr.update(), gr.update()
+
+# Manual logging chat
+def open_manual_chat():
+    return gr.update(visible=True), [], gr.update(value="")
+
+def send_manual_message(user_message, history, user_id):
+    if not user_message.strip():
+        return history, gr.update(), gr.update(visible=False), gr.update(value="")
+
+    user_turns = sum(1 for m in history if m["role"] == "user")
+    if user_turns >= MAX_TURNS:
+        history = history + [{"role": "assistant", "content": "We've reached the maximum exchanges. Please confirm to log."}]
+        return history, gr.update(value=_history_to_html(history)), gr.update(visible=False), gr.update(value="")
+
+    default_date = date.today().isoformat()
+    try:
+        new_history, log_data = chat_manual(history, user_message, default_date)
+    except Exception as e:
+        new_history = history + [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": f"Sorry, I had an error: {str(e)}"}
+        ]
+        log_data = None
+
+    show_confirm = log_data is not None
+    confirm_html = ""
+    if log_data:
+        t = log_data.get("totals", {})
+        log_date = log_data.get("log_date", date.today().isoformat())
+        confirm_html = f"""
+<div style="background:#f0fff4;border:2px solid #48bb78;border-radius:12px;padding:16px;margin-top:8px">
+  <div style="font-weight:700;color:#276749;margin-bottom:8px">✓ Ready to log: {log_data.get('meal_name', 'Meal')}</div>
+  <div style="font-size:0.85rem;color:#4a5568">{log_data.get('items_description', '')} — {log_date}</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
+    <div style="text-align:center"><div style="font-weight:700;color:#f8b500">{t.get('calories_kcal', 0):.0f}</div><div style="font-size:0.7rem;color:#718096">KCAL</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{t.get('protein_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">PROTEIN</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{t.get('fat_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">FAT</div></div>
+    <div style="text-align:center"><div style="font-weight:700">{t.get('carbs_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">CARBS</div></div>
+  </div>
+</div>"""
+
+    return (
+        new_history,
+        gr.update(value=_history_to_html(new_history)),
+        gr.update(visible=show_confirm, value=confirm_html),
+        gr.update(value=""),
+    )
+
+def confirm_manual_log(history, user_id):
+    for msg in reversed(history):
+        if msg["role"] == "assistant":
+            from llm_chat import _extract_log_data
+            log_data = _extract_log_data(msg["content"])
+            if log_data:
+                totals = log_data.get("totals", {})
+                meal_name = log_data.get("meal_name", "Manual meal")
+                log_date = log_data.get("log_date", date.today().isoformat())
+                # log with custom date
+                import json as _json
+                from datetime import datetime as _dt
+                logged_at = f"{log_date}T12:00:00"
+                from db import get_conn
+                with get_conn() as conn:
+                    conn.execute("""
+                        INSERT INTO meals
+                        (user_id, logged_at, meal_name, calories_kcal, protein_g,
+                         fat_g, carbs_g, fiber_g, items_json, source)
+                        VALUES (?,?,?,?,?,?,?,?,?,?)
+                    """, (
+                        user_id, logged_at, meal_name,
+                        totals.get("calories_kcal", 0),
+                        totals.get("protein_g", 0),
+                        totals.get("fat_g", 0),
+                        totals.get("carbs_g", 0),
+                        totals.get("fiber_g", 0),
+                        _json.dumps([]),
+                        "manual",
+                    ))
+                return (
+                    gr.update(visible=False),
+                    [],
+                    gr.update(value=""),
+                    gr.update(visible=False),
+                    '<p class="status-success">✓ Meal logged manually!</p>',
+                    build_dashboard_html(user_id),
+                )
+    return gr.update(), history, gr.update(), gr.update(), gr.update(), gr.update()
+
+def _history_to_html(history: list) -> str:
+    """Convert chat history to HTML display."""
+    if not history:
+        return ""
+    parts = []
+    for msg in history:
+        if msg["role"] == "user":
+            parts.append(f"""
+<div style="display:flex;justify-content:flex-end;margin:8px 0">
+  <div style="background:#4a00e0;color:white;border-radius:12px 12px 2px 12px;padding:10px 14px;max-width:80%;font-size:0.88rem">
+    {msg["content"]}
+  </div>
+</div>""")
+        else:
+            # Strip JSON blocks from display
+            display_text = msg["content"]
+            if "```json" in display_text:
+                display_text = display_text[:display_text.find("```json")].strip()
+                if not display_text:
+                    display_text = "I've prepared the nutrition summary below — does this look correct?"
+            display_text = display_text.replace("\n", "<br>")
+            parts.append(f"""
+<div style="display:flex;justify-content:flex-start;margin:8px 0">
+  <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:12px 12px 12px 2px;padding:10px 14px;max-width:80%;font-size:0.88rem;color:#2d3748">
+    {display_text}
+  </div>
+</div>""")
+    return f'<div style="height:300px;overflow-y:auto;padding:8px">' + "".join(parts) + "</div>"
+
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estimator") as demo:
 
     # session state — stores logged-in username, empty string = not logged in
     current_user = gr.State("")
+    correction_history = gr.State([])
+    manual_history     = gr.State([])
 
     gr.HTML("""
         <div style="text-align:center;padding:28px 0 12px">
@@ -699,7 +936,8 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
                     with gr.Column(scale=1):
                         input_image = gr.Image(sources=["upload", "webcam"], type="pil", label="Your meal", height=380)
                         analyze_btn = gr.Button("Analyze Meal", variant="primary", size="lg")
-                        log_btn     = gr.Button("📋 Log Meal", variant="secondary", size="sm", visible=False)
+                        log_btn      = gr.Button("📋 Log Meal", variant="secondary", size="sm", visible=False)
+                        disagree_btn = gr.Button("✏️ Disagree? Adjust with AI", variant="secondary", size="sm", visible=False)
                         status_html = gr.HTML("")
 
                     with gr.Column(scale=1):
@@ -714,9 +952,40 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
                 with gr.Column(visible=False) as vlm_panel:
                     vlm_html = gr.HTML("")
 
+                with gr.Column(visible=False) as correction_chat_panel:
+                    gr.HTML("<div class='section-title'>💬 Adjust with AI</div>")
+                    correction_chat_display = gr.HTML("")
+                    correction_input = gr.Textbox(
+                        placeholder="Tell me what's wrong or what you actually ate...",
+                        label="",
+                        show_label=False
+                    )
+                    with gr.Row():
+                        correction_send_btn    = gr.Button("Send", variant="primary", size="sm")
+                        correction_close_btn   = gr.Button("Cancel", size="sm")
+                    correction_confirm_html = gr.HTML("", visible=False)
+                    correction_confirm_btn  = gr.Button("✓ Log this meal", variant="primary")
+
             with gr.Tab("📊 Dashboard"):
-                refresh_btn    = gr.Button("🔄 Refresh", size="sm")
+                with gr.Row():
+                    refresh_btn    = gr.Button("🔄 Refresh", size="sm")
+                    manual_log_btn = gr.Button("➕ Log food manually", variant="secondary", size="sm")
                 dashboard_html = gr.HTML("")
+
+                with gr.Column(visible=False) as manual_chat_panel:
+                    gr.HTML("<div class='section-title'>💬 Log food manually</div>")
+                    manual_chat_display = gr.HTML("")
+                    manual_input = gr.Textbox(
+                        placeholder="Describe what you ate, e.g. 'bowl of oatmeal with banana for breakfast'",
+                        label="",
+                        show_label=False
+                    )
+                    with gr.Row():
+                        manual_send_btn  = gr.Button("Send", variant="primary", size="sm")
+                        manual_close_btn = gr.Button("Cancel", size="sm")
+                    manual_confirm_html = gr.HTML("", visible=False)
+                    manual_confirm_btn  = gr.Button("✓ Log this meal", variant="primary")
+                    manual_status_html  = gr.HTML("")
 
             with gr.Tab("👤 Profile"):
                 profile_intro = gr.HTML("<div style='margin-bottom:16px;font-size:0.9rem;color:#718096'>Set up your profile to get personalized calorie targets.</div>")
@@ -782,18 +1051,6 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
         outputs=[dashboard_html],
     )
 
-    # Analyze
-    analyze_btn.click(
-        fn=analyze_image,
-        inputs=[input_image],
-        outputs=[
-            output_image, warnings_html, warnings_panel,
-            results_html, results_panel,
-            vlm_html, vlm_panel,
-            status_html, log_btn,
-        ],
-    )
-
     log_btn.click(
         fn=do_log_meal,
         inputs=[current_user],
@@ -811,6 +1068,71 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
         fn=on_update_weight,
         inputs=[new_weight_input, current_user],
         outputs=[update_weight_status],
+    )
+
+    # Correction chat
+    analyze_btn.click(
+        fn=analyze_image,
+        inputs=[input_image],
+        outputs=[
+            output_image, warnings_html, warnings_panel,
+            results_html, results_panel,
+            vlm_html, vlm_panel,
+            status_html, log_btn, disagree_btn,
+        ],
+    )
+
+    disagree_btn.click(
+        fn=open_correction_chat,
+        inputs=[current_user],
+        outputs=[correction_chat_panel, correction_history, correction_chat_display],
+    )
+
+    correction_send_btn.click(
+        fn=send_correction_message,
+        inputs=[correction_input, correction_history, current_user],
+        outputs=[correction_history, correction_chat_display,
+                 correction_confirm_html, correction_input],
+    )
+
+    correction_confirm_btn.click(
+        fn=confirm_correction_log,
+        inputs=[correction_history, current_user],
+        outputs=[correction_chat_panel, correction_history, correction_chat_display,
+                 correction_confirm_html, status_html, dashboard_html],
+    )
+
+    correction_close_btn.click(
+        fn=lambda: (gr.update(visible=False), [], gr.update(value="")),
+        inputs=[],
+        outputs=[correction_chat_panel, correction_history, correction_chat_display],
+    )
+
+    # Manual logging chat
+    manual_log_btn.click(
+        fn=open_manual_chat,
+        inputs=[],
+        outputs=[manual_chat_panel, manual_history, manual_chat_display],
+    )
+
+    manual_send_btn.click(
+        fn=send_manual_message,
+        inputs=[manual_input, manual_history, current_user],
+        outputs=[manual_history, manual_chat_display,
+                 manual_confirm_html, manual_input],
+    )
+
+    manual_confirm_btn.click(
+        fn=confirm_manual_log,
+        inputs=[manual_history, current_user],
+        outputs=[manual_chat_panel, manual_history, manual_chat_display,
+                 manual_confirm_html, manual_status_html, dashboard_html],
+    )
+
+    manual_close_btn.click(
+        fn=lambda: (gr.update(visible=False), [], gr.update(value="")),
+        inputs=[],
+        outputs=[manual_chat_panel, manual_history, manual_chat_display],
     )
 
 

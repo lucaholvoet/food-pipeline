@@ -14,12 +14,9 @@ from db import (init_db, log_meal, get_today_meals, get_today_totals,
                 delete_meal, generate_user_id)
 
 from auth import init_auth_db, register_user, login_user
-
 from llm_chat import chat_correction, chat_manual, MAX_TURNS
 
 init_auth_db()
-
-
 init_db()
 init_profile_db()
 
@@ -46,11 +43,12 @@ CUSTOM_CSS = """
     padding: 10px 14px; text-align: left; font-weight: 600;
 }
 .food-table td {
-    padding: 11px 14px; border-bottom: 1px solid #edf2f7;
-    font-size: 0.9rem; color: #2d3748;
+    padding: 11px 14px; border-bottom: 1px solid #2d3748;
+    font-size: 0.9rem; color: #e2e8f0;
+    background: #1a202c;
 }
 .food-table tr:last-child td { border-bottom: none; }
-.food-table tr:hover td { background: #f7fafc; }
+.food-table tr:hover td { background: #2d3748; }
 
 .totals-card {
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -68,35 +66,35 @@ CUSTOM_CSS = """
 .proc-time { font-size: 0.75rem; color: #a0aec0; text-align: right; margin-top: 10px; }
 
 .badge { border-radius: 12px; padding: 3px 10px; font-size: 0.78rem; font-weight: 600; }
-.badge-green  { background: #c6f6d5; color: #276749; }
-.badge-yellow { background: #fefcbf; color: #744210; }
-.badge-red    { background: #fed7d7; color: #742a2a; }
+.badge-green  { background: #276749; color: #c6f6d5; }
+.badge-yellow { background: #744210; color: #fefcbf; }
+.badge-red    { background: #742a2a; color: #fed7d7; }
 
 .warning-banner {
-    background: #fffbeb; border-left: 4px solid #f59e0b;
+    background: #3d2e00; border-left: 4px solid #f59e0b;
     padding: 10px 16px; border-radius: 0 6px 6px 0;
-    color: #78350f; font-size: 0.88rem; margin: 4px 0;
+    color: #fcd34d; font-size: 0.88rem; margin: 4px 0;
 }
 .section-title {
-    font-size: 0.85rem; font-weight: 700; color: #4a5568;
+    font-size: 0.85rem; font-weight: 700; color: #a0aec0;
     text-transform: uppercase; letter-spacing: 0.07em;
     margin: 20px 0 10px; padding-bottom: 6px;
-    border-bottom: 2px solid #e2e8f0;
+    border-bottom: 2px solid #2d3748;
 }
 .vlm-header {
     background: linear-gradient(90deg, #4a00e0, #8e2de2);
     color: white; padding: 12px 20px; border-radius: 10px;
     font-weight: 700; margin-bottom: 12px; font-size: 0.92rem;
 }
-.vlm-card { border: 1px solid #e9d8fd; border-radius: 10px; padding: 16px; margin: 8px 0; background: #faf5ff; }
-.vlm-note { background: #f3e8ff; border-left: 3px solid #805ad5; padding: 8px 14px; border-radius: 0 6px 6px 0; font-size: 0.83rem; color: #553c9a; margin-top: 6px; }
+.vlm-card { border: 1px solid #4a00e0; border-radius: 10px; padding: 16px; margin: 8px 0; background: #1a1035; }
+.vlm-note { background: #2d1b69; border-left: 3px solid #805ad5; padding: 8px 14px; border-radius: 0 6px 6px 0; font-size: 0.83rem; color: #d6bcfa; margin-top: 6px; }
 .action-badge { display: inline-block; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 8px; }
-.action-corrected { background: #fed7d7; color: #c53030; }
-.action-confirmed { background: #c6f6d5; color: #276749; }
-.action-unknown   { background: #fefcbf; color: #744210; }
+.action-corrected { background: #742a2a; color: #fed7d7; }
+.action-confirmed { background: #276749; color: #c6f6d5; }
+.action-unknown   { background: #744210; color: #fefcbf; }
 .color-dot { display: inline-block; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
-.status-error { color: #e53e3e; font-size: 0.9rem; padding: 4px 0; }
-.status-success { color: #276749; font-size: 0.9rem; padding: 4px 0; font-weight: 600; }
+.status-error { color: #fc8181; font-size: 0.9rem; padding: 4px 0; }
+.status-success { color: #68d391; font-size: 0.9rem; padding: 4px 0; font-weight: 600; }
 
 .log-btn { margin-top: 8px; }
 .dashboard-card {
@@ -106,11 +104,11 @@ CUSTOM_CSS = """
 }
 .dashboard-number { font-size: 2.4rem; font-weight: 800; color: #f8b500; }
 .dashboard-label { font-size: 0.78rem; color: #a0aec0; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
-.meal-row { padding: 12px 0; border-bottom: 1px solid #edf2f7; display: flex; justify-content: space-between; align-items: center; }
+.meal-row { padding: 12px 0; border-bottom: 1px solid #2d3748; display: flex; justify-content: space-between; align-items: center; }
 .meal-row:last-child { border-bottom: none; }
-.bar-container { background: #edf2f7; border-radius: 8px; height: 24px; margin: 4px 0; overflow: hidden; position: relative; }
+.bar-container { background: #2d3748; border-radius: 8px; height: 24px; margin: 4px 0; overflow: hidden; position: relative; }
 .bar-fill { background: linear-gradient(90deg, #f8b500, #f97316); height: 100%; border-radius: 8px; transition: width 0.3s; }
-.bar-label { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 0.75rem; font-weight: 600; color: #2d3748; }
+.bar-label { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 0.75rem; font-weight: 600; color: #e2e8f0; }
 """
 
 
@@ -213,7 +211,7 @@ def _table_header(conf_label="Confidence"):
 
 def build_cv_items_table(items):
     if not items:
-        return '<p style="color:#718096;font-size:0.9rem;padding:8px 0">No food items detected.</p>'
+        return '<p style="color:#a0aec0;font-size:0.9rem;padding:8px 0">No food items detected.</p>'
     rows = _table_header()
     for idx, item in enumerate(items):
         color = BBOX_COLORS[idx % len(BBOX_COLORS)]
@@ -250,7 +248,7 @@ def build_vlm_items_table(items):
         grams = float(portion.get("estimated_grams", 0))
         if item.get("action") == "corrected":
             orig_name = original.get("food_name", "").replace("_", " ").title()
-            food_cell = f'<s style="color:#a0aec0;font-size:0.82rem">{orig_name}</s><br><strong>{refined.get("display_name","")}</strong>'
+            food_cell = f'<s style="color:#718096;font-size:0.82rem">{orig_name}</s><br><strong>{refined.get("display_name","")}</strong>'
         else:
             food_cell = f'<strong>{refined.get("display_name","")}</strong>'
         rows += f"""<tr>
@@ -283,25 +281,25 @@ def build_vlm_panel(data):
         orig_name     = original.get("food_name", "").replace("_", " ").title()
         refined_name  = refined.get("display_name", "")
         if action == "corrected":
-            food_line = f'<span style="color:#e53e3e;text-decoration:line-through">{orig_name}</span><span style="color:#805ad5;font-weight:bold;margin:0 8px">→</span><strong style="color:#276749">{refined_name}</strong>'
+            food_line = f'<span style="color:#fc8181;text-decoration:line-through">{orig_name}</span><span style="color:#b794f4;font-weight:bold;margin:0 8px">→</span><strong style="color:#68d391">{refined_name}</strong>'
         elif action == "confirmed":
-            food_line = f'<strong style="color:#276749">{refined_name}</strong>'
+            food_line = f'<strong style="color:#68d391">{refined_name}</strong>'
         else:
-            food_line = f'<strong style="color:#2d3748">{refined_name}</strong>'
+            food_line = f'<strong style="color:#e2e8f0">{refined_name}</strong>'
         desc = refined.get("food_description", "")
-        desc_html = f'<div style="color:#4a5568;font-size:0.85rem;margin:6px 0">{desc}</div>' if desc else ""
+        desc_html = f'<div style="color:#a0aec0;font-size:0.85rem;margin:6px 0">{desc}</div>' if desc else ""
         portion_method = portion.get("portion_method", "").replace("_", " ")
         portion_conf   = int(round(float(portion.get("vlm_confidence", 0)) * 100))
         grams          = float(portion.get("estimated_grams", 0))
         cards.append(f"""<div class="vlm-card">
   <div style="margin-bottom:8px">
     <span class="action-badge action-{action}">{action}</span>
-    <span style="color:#718096;font-size:0.85rem">Item #{item.get("item_id","")}</span>
-    <span style="float:right;color:#718096;font-size:0.82rem">CV {orig_conf_pct}% → VLM {vlm_conf_pct}%</span>
+    <span style="color:#a0aec0;font-size:0.85rem">Item #{item.get("item_id","")}</span>
+    <span style="float:right;color:#a0aec0;font-size:0.82rem">CV {orig_conf_pct}% → VLM {vlm_conf_pct}%</span>
   </div>
   <div style="font-size:1rem;margin:6px 0">{food_line}</div>
   {desc_html}
-  <div style="color:#718096;font-size:0.82rem;margin-top:4px">Portion: {grams:.0f}g via {portion_method} ({portion_conf}% confidence)</div>
+  <div style="color:#a0aec0;font-size:0.82rem;margin-top:4px">Portion: {grams:.0f}g via {portion_method} ({portion_conf}% confidence)</div>
 </div>""")
     notes = data.get("notes", [])
     if isinstance(notes, str):
@@ -318,7 +316,7 @@ def build_vlm_panel(data):
 def build_dashboard_html(user_id: str = "default"):
     today_totals = get_today_totals(user_id)
     today_meals  = get_today_meals(user_id)
-    weekly       = get_weekly_data(user_id)  # now (iso_date, label, calories)
+    weekly       = get_weekly_data(user_id)
     profile      = get_profile(user_id)
 
     calories_eaten = today_totals["calories_kcal"]
@@ -337,9 +335,9 @@ def build_dashboard_html(user_id: str = "default"):
         if days_left > 0:
             goal_info = f'<div style="font-size:0.78rem;color:#a0aec0;margin-top:8px">🎯 Goal date: <strong style="color:#f8b500">{goal_str}</strong> — {days_left} days remaining</div>'
         elif days_left == 0:
-            goal_info = f'<div style="font-size:0.78rem;color:#48bb78;margin-top:8px">🎉 Goal date is today! ({goal_str})</div>'
+            goal_info = f'<div style="font-size:0.78rem;color:#68d391;margin-top:8px">🎉 Goal date is today! ({goal_str})</div>'
         else:
-            goal_info = f'<div style="font-size:0.78rem;color:#e53e3e;margin-top:8px">⚠ Goal date passed ({goal_str})</div>'
+            goal_info = f'<div style="font-size:0.78rem;color:#fc8181;margin-top:8px">⚠ Goal date passed ({goal_str})</div>'
 
     summary = f"""
 <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
@@ -350,7 +348,7 @@ def build_dashboard_html(user_id: str = "default"):
       <div style="font-size:0.85rem;color:#a0aec0">of {daily_target:,.0f} target</div>
     </div>
     <div style="text-align:right">
-      <div style="font-size:2rem;font-weight:700;color:{'#48bb78' if calories_left > 0 else '#e53e3e'}">{calories_left:,.0f}</div>
+      <div style="font-size:2rem;font-weight:700;color:{'#68d391' if calories_left > 0 else '#fc8181'}">{calories_left:,.0f}</div>
       <div style="font-size:0.78rem;color:#a0aec0">{'remaining' if calories_left > 0 else 'over target'}</div>
     </div>
   </div>
@@ -366,14 +364,14 @@ def build_dashboard_html(user_id: str = "default"):
   {goal_info}
 </div>"""
 
-    # weekly bar chart — now uses label with date
+    # weekly bar chart
     max_cal = max((c for _, _, c in weekly), default=1) or 1
     bars = ""
     for iso_date, label, cal_val in weekly:
         pct = int((cal_val / max_cal) * 100)
         bars += f"""
 <div style="margin-bottom:10px">
-  <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:#4a5568;margin-bottom:3px">
+  <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:#a0aec0;margin-bottom:3px">
     <span>{label}</span><span>{cal_val:,.0f} kcal</span>
   </div>
   <div class="bar-container">
@@ -383,11 +381,11 @@ def build_dashboard_html(user_id: str = "default"):
 
     weekly_section = f"""
 <div class="section-title">Last 7 days</div>
-<div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0">
+<div style="background:#1e2533;border-radius:12px;padding:16px;border:1px solid #2d3748">
 {bars}
 </div>"""
 
-    # today's meals list with full date
+    # today's meals list
     today_str = date.today().strftime("%A %d %B %Y")
     if today_meals:
         meal_rows = ""
@@ -396,14 +394,14 @@ def build_dashboard_html(user_id: str = "default"):
             meal_rows += f"""
 <div class="meal-row">
   <div>
-    <div style="font-weight:600;color:#2d3748">{m["meal_name"]}</div>
+    <div style="font-weight:600;color:#e2e8f0">{m["meal_name"]}</div>
     <div style="font-size:0.78rem;color:#718096">{time_str} &nbsp;·&nbsp; {m["protein_g"]:.0f}g protein &nbsp;·&nbsp; {m["carbs_g"]:.0f}g carbs</div>
   </div>
   <div style="text-align:right">
     <div style="font-weight:700;color:#f8b500">{m["calories_kcal"]:.0f} kcal</div>
   </div>
 </div>"""
-        meals_section = f'<div class="section-title">Today\'s meals — {today_str}</div><div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0">{meal_rows}</div>'
+        meals_section = f'<div class="section-title">Today\'s meals — {today_str}</div><div style="background:#1e2533;border-radius:12px;padding:16px;border:1px solid #2d3748">{meal_rows}</div>'
     else:
         meals_section = f'<div style="color:#718096;text-align:center;padding:24px">No meals logged today ({today_str}). Analyze a meal and click Log Meal!</div>'
 
@@ -412,7 +410,6 @@ def build_dashboard_html(user_id: str = "default"):
 
 # ── Gradio callbacks ──────────────────────────────────────────────────────────
 
-# Store last result for logging
 _last_result = {"data": None}
 
 def _empty_return(msg=""):
@@ -427,8 +424,8 @@ def _empty_return(msg=""):
         gr.update(value=""),
         hidden,
         status,
-        gr.update(visible=False),  # log_btn
-        gr.update(visible=False),  # disagree_btn
+        gr.update(visible=False),
+        gr.update(visible=False),
     )
 
 
@@ -494,8 +491,8 @@ def analyze_image(input_image):
         gr.update(value=vlm_html),
         gr.update(visible=vlm),
         "",
-        gr.update(visible=True),  
-        gr.update(visible=True),
+        gr.update(visible=True),   # log_btn
+        gr.update(visible=True),   # disagree_btn
     )
 
 
@@ -515,10 +512,11 @@ def do_log_meal(user_id):
 def refresh_dashboard(user_id):
     return build_dashboard_html(user_id)
 
+
 def build_profile_result_html(calc, profile):
     direction = "lose" if calc["weekly_change_kg"] < 0 else "gain"
     arrow = "↓" if calc["weekly_change_kg"] < 0 else "↑"
-    color = "#48bb78" if direction == "lose" else "#f6ad55"
+    color = "#68d391" if direction == "lose" else "#f6ad55"
 
     goal_date = calc.get("goal_date", "")
     try:
@@ -546,35 +544,35 @@ def build_profile_result_html(calc, profile):
       <div class="dashboard-label">maintenance calories</div>
     </div>
   </div>
-  <div style="background:white;border-radius:12px;padding:16px;border:1px solid #e2e8f0">
+  <div style="background:#1e2533;border-radius:12px;padding:16px;border:1px solid #2d3748">
     <div class="section-title">Daily macro targets</div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px">
-      <div style="text-align:center;padding:12px;background:#f7fafc;border-radius:8px">
-        <div style="font-size:1.5rem;font-weight:700;color:#3182ce">{calc['protein_g']}g</div>
-        <div style="font-size:0.75rem;color:#718096;text-transform:uppercase">Protein</div>
+      <div style="text-align:center;padding:12px;background:#2d3748;border-radius:8px">
+        <div style="font-size:1.5rem;font-weight:700;color:#63b3ed">{calc['protein_g']}g</div>
+        <div style="font-size:0.75rem;color:#a0aec0;text-transform:uppercase">Protein</div>
       </div>
-      <div style="text-align:center;padding:12px;background:#f7fafc;border-radius:8px">
-        <div style="font-size:1.5rem;font-weight:700;color:#e53e3e">{calc['fat_g']}g</div>
-        <div style="font-size:0.75rem;color:#718096;text-transform:uppercase">Fat</div>
+      <div style="text-align:center;padding:12px;background:#2d3748;border-radius:8px">
+        <div style="font-size:1.5rem;font-weight:700;color:#fc8181">{calc['fat_g']}g</div>
+        <div style="font-size:0.75rem;color:#a0aec0;text-transform:uppercase">Fat</div>
       </div>
-      <div style="text-align:center;padding:12px;background:#f7fafc;border-radius:8px">
-        <div style="font-size:1.5rem;font-weight:700;color:#38a169">{calc['carbs_g']}g</div>
-        <div style="font-size:0.75rem;color:#718096;text-transform:uppercase">Carbs</div>
+      <div style="text-align:center;padding:12px;background:#2d3748;border-radius:8px">
+        <div style="font-size:1.5rem;font-weight:700;color:#68d391">{calc['carbs_g']}g</div>
+        <div style="font-size:0.75rem;color:#a0aec0;text-transform:uppercase">Carbs</div>
       </div>
     </div>
     <div style="margin-top:12px;font-size:0.78rem;color:#718096;text-align:center">
-      BMR: {calc['bmr']} kcal &nbsp;·&nbsp; TDEE: {calc['tdee']} kcal &nbsp;·&nbsp; 
+      BMR: {calc['bmr']} kcal &nbsp;·&nbsp; TDEE: {calc['tdee']} kcal &nbsp;·&nbsp;
       Adjustment: {calc['daily_adjustment']:+d} kcal/day
     </div>
   </div>
 </div>"""
 
+
 def on_save_profile(age, gender, height, weight, goal_weight, goal_date, activity, user_id):
-    # validate date format
     try:
         date.fromisoformat(goal_date)
     except ValueError:
-        return '<p class="status-error">Invalid date format. Use YYYY-MM-DD (e.g. 2025-12-31)</p>', "", gr.update()
+        return '<p class="status-error">Invalid date format. Use YYYY-MM-DD (e.g. 2026-12-31)</p>', "", gr.update()
     try:
         calc = save_profile(int(age), gender, float(height), float(weight),
                             float(goal_weight), goal_date, activity,
@@ -588,6 +586,7 @@ def on_save_profile(age, gender, height, weight, goal_weight, goal_date, activit
     except Exception as e:
         return f'<p class="status-error">Error: {e}</p>', "", gr.update()
 
+
 def on_update_weight(new_weight, user_id):
     try:
         calc = update_weight(float(new_weight), user_id=user_id)
@@ -596,28 +595,27 @@ def on_update_weight(new_weight, user_id):
         return f'<p class="status-success">✓ Weight updated! New target: {calc["daily_calories"]} kcal</p>'
     except Exception as e:
         return f'<p class="status-error">Error: {e}</p>'
-    
+
 
 def do_login(username, password):
     success, result = login_user(username, password)
     if not success:
         return (
-            gr.update(),           # current_user unchanged
-            gr.update(),           # auth_panel unchanged
-            gr.update(),           # main_panel unchanged
+            gr.update(),
+            gr.update(),
+            gr.update(),
             f'<p class="status-error">{result}</p>',
             gr.update(),
         )
-    # load profile for welcome message
-    profile = get_profile(result)
     welcome = f'<div style="text-align:right;padding:4px 0;font-size:0.85rem;color:#718096">Logged in as <strong>{result}</strong></div>'
     return (
-        result,                                    # current_user = username
-        gr.update(visible=False),                  # hide auth_panel
-        gr.update(visible=True),                   # show main_panel
-        "",                                        # clear login status
-        welcome,                                   # welcome message
+        result,
+        gr.update(visible=False),
+        gr.update(visible=True),
+        "",
+        welcome,
     )
+
 
 def do_register(username, password, confirm):
     if password != confirm:
@@ -627,18 +625,21 @@ def do_register(username, password, confirm):
         return gr.update(), f'<p class="status-error">{result}</p>'
     return gr.update(), f'<p class="status-success">✓ Account created! Go to Login tab.</p>'
 
+
 def do_logout():
     return (
-        "",                       # clear current_user
-        gr.update(visible=True),  # show auth_panel
-        gr.update(visible=False), # hide main_panel
-        "",                       # clear welcome
+        "",
+        gr.update(visible=True),
+        gr.update(visible=False),
+        "",
     )
+
 
 def load_dashboard(username):
     if not username:
         return ""
     return build_dashboard_html(username)
+
 
 def load_profile_tab(username):
     if not username:
@@ -663,21 +664,16 @@ def load_profile_tab(username):
         gr.update(value=profile.get("goal_date") if profile else (date.today().replace(year=date.today().year + 1)).isoformat()),
     )
 
+
 # ── LLM Chat callbacks ────────────────────────────────────────────────────────
 
 def open_correction_chat(user_id):
-    """Open the correction chat panel with initial message."""
     data = _last_result.get("data")
     if not data:
-        return (
-            gr.update(visible=False),
-            [],
-            gr.update(value=""),
-        )
+        return gr.update(visible=False), [], gr.update(value="")
     items = data.get("items", [])
     is_vlm = is_vlm_response(data)
 
-    # Build summary for first message
     lines = ["I see the pipeline detected:"]
     for item in items:
         if is_vlm:
@@ -698,8 +694,8 @@ def open_correction_chat(user_id):
         gr.update(value=_history_to_html(history)),
     )
 
+
 def send_correction_message(user_message, history, user_id):
-    """Send a message in the correction chat."""
     if not user_message.strip():
         return history, gr.update(), gr.update(visible=False), gr.update(value="")
 
@@ -707,7 +703,6 @@ def send_correction_message(user_message, history, user_id):
     if not data:
         return history, gr.update(), gr.update(visible=False), gr.update(value="")
 
-    # Check turn limit
     user_turns = sum(1 for m in history if m["role"] == "user")
     if user_turns >= MAX_TURNS:
         history = history + [{"role": "assistant", "content": "We've reached the maximum number of exchanges. Please confirm what you'd like to log or start over."}]
@@ -727,14 +722,14 @@ def send_correction_message(user_message, history, user_id):
     if log_data:
         t = log_data.get("totals", {})
         confirm_html = f"""
-<div style="background:#f0fff4;border:2px solid #48bb78;border-radius:12px;padding:16px;margin-top:8px">
-  <div style="font-weight:700;color:#276749;margin-bottom:8px">✓ Ready to log: {log_data.get('meal_name', 'Meal')}</div>
-  <div style="font-size:0.85rem;color:#4a5568">{log_data.get('items_description', '')}</div>
+<div style="background:#1a2e1a;border:2px solid #68d391;border-radius:12px;padding:16px;margin-top:8px">
+  <div style="font-weight:700;color:#68d391;margin-bottom:8px">✓ Ready to log: {log_data.get('meal_name', 'Meal')}</div>
+  <div style="font-size:0.85rem;color:#a0aec0">{log_data.get('items_description', '')}</div>
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
     <div style="text-align:center"><div style="font-weight:700;color:#f8b500">{t.get('calories_kcal', 0):.0f}</div><div style="font-size:0.7rem;color:#718096">KCAL</div></div>
-    <div style="text-align:center"><div style="font-weight:700">{t.get('protein_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">PROTEIN</div></div>
-    <div style="text-align:center"><div style="font-weight:700">{t.get('fat_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">FAT</div></div>
-    <div style="text-align:center"><div style="font-weight:700">{t.get('carbs_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">CARBS</div></div>
+    <div style="text-align:center"><div style="font-weight:700;color:#e2e8f0">{t.get('protein_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">PROTEIN</div></div>
+    <div style="text-align:center"><div style="font-weight:700;color:#e2e8f0">{t.get('fat_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">FAT</div></div>
+    <div style="text-align:center"><div style="font-weight:700;color:#e2e8f0">{t.get('carbs_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">CARBS</div></div>
   </div>
 </div>"""
 
@@ -745,10 +740,8 @@ def send_correction_message(user_message, history, user_id):
         gr.update(value=""),
     )
 
+
 def confirm_correction_log(history, user_id):
-    """Log the corrected meal from chat."""
-    data = _last_result.get("data")
-    # Find the last log_data in history
     for msg in reversed(history):
         if msg["role"] == "assistant":
             from llm_chat import _extract_log_data
@@ -758,18 +751,19 @@ def confirm_correction_log(history, user_id):
                 meal_name = log_data.get("meal_name", "Corrected meal")
                 log_meal(totals, [], user_id=user_id, source="llm_correction", meal_name=meal_name)
                 return (
-                    gr.update(visible=False),   # hide chat panel
-                    [],                          # clear history
-                    gr.update(value=""),         # clear chat display
-                    gr.update(visible=False),    # hide confirm
+                    gr.update(visible=False),
+                    [],
+                    gr.update(value=""),
+                    gr.update(visible=False),
                     '<p class="status-success">✓ Corrected meal logged!</p>',
                     build_dashboard_html(user_id),
                 )
     return gr.update(), history, gr.update(), gr.update(), gr.update(), gr.update()
 
-# Manual logging chat
+
 def open_manual_chat():
     return gr.update(visible=True), [], gr.update(value="")
+
 
 def send_manual_message(user_message, history, user_id):
     if not user_message.strip():
@@ -796,14 +790,14 @@ def send_manual_message(user_message, history, user_id):
         t = log_data.get("totals", {})
         log_date = log_data.get("log_date", date.today().isoformat())
         confirm_html = f"""
-<div style="background:#f0fff4;border:2px solid #48bb78;border-radius:12px;padding:16px;margin-top:8px">
-  <div style="font-weight:700;color:#276749;margin-bottom:8px">✓ Ready to log: {log_data.get('meal_name', 'Meal')}</div>
-  <div style="font-size:0.85rem;color:#4a5568">{log_data.get('items_description', '')} — {log_date}</div>
+<div style="background:#1a2e1a;border:2px solid #68d391;border-radius:12px;padding:16px;margin-top:8px">
+  <div style="font-weight:700;color:#68d391;margin-bottom:8px">✓ Ready to log: {log_data.get('meal_name', 'Meal')}</div>
+  <div style="font-size:0.85rem;color:#a0aec0">{log_data.get('items_description', '')} — {log_date}</div>
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
     <div style="text-align:center"><div style="font-weight:700;color:#f8b500">{t.get('calories_kcal', 0):.0f}</div><div style="font-size:0.7rem;color:#718096">KCAL</div></div>
-    <div style="text-align:center"><div style="font-weight:700">{t.get('protein_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">PROTEIN</div></div>
-    <div style="text-align:center"><div style="font-weight:700">{t.get('fat_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">FAT</div></div>
-    <div style="text-align:center"><div style="font-weight:700">{t.get('carbs_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">CARBS</div></div>
+    <div style="text-align:center"><div style="font-weight:700;color:#e2e8f0">{t.get('protein_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">PROTEIN</div></div>
+    <div style="text-align:center"><div style="font-weight:700;color:#e2e8f0">{t.get('fat_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">FAT</div></div>
+    <div style="text-align:center"><div style="font-weight:700;color:#e2e8f0">{t.get('carbs_g', 0):.0f}g</div><div style="font-size:0.7rem;color:#718096">CARBS</div></div>
   </div>
 </div>"""
 
@@ -814,18 +808,17 @@ def send_manual_message(user_message, history, user_id):
         gr.update(value=""),
     )
 
+
 def confirm_manual_log(history, user_id):
     for msg in reversed(history):
         if msg["role"] == "assistant":
             from llm_chat import _extract_log_data
             log_data = _extract_log_data(msg["content"])
             if log_data:
-                totals = log_data.get("totals", {})
+                totals    = log_data.get("totals", {})
                 meal_name = log_data.get("meal_name", "Manual meal")
-                log_date = log_data.get("log_date", date.today().isoformat())
-                # log with custom date
+                log_date  = log_data.get("log_date", date.today().isoformat())
                 import json as _json
-                from datetime import datetime as _dt
                 logged_at = f"{log_date}T12:00:00"
                 from db import get_conn
                 with get_conn() as conn:
@@ -854,8 +847,8 @@ def confirm_manual_log(history, user_id):
                 )
     return gr.update(), history, gr.update(), gr.update(), gr.update(), gr.update()
 
+
 def _history_to_html(history: list) -> str:
-    """Convert chat history to HTML display."""
     if not history:
         return ""
     parts = []
@@ -868,7 +861,6 @@ def _history_to_html(history: list) -> str:
   </div>
 </div>""")
         else:
-            # Strip JSON blocks from display
             display_text = msg["content"]
             if "```json" in display_text:
                 display_text = display_text[:display_text.find("```json")].strip()
@@ -877,29 +869,28 @@ def _history_to_html(history: list) -> str:
             display_text = display_text.replace("\n", "<br>")
             parts.append(f"""
 <div style="display:flex;justify-content:flex-start;margin:8px 0">
-  <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:12px 12px 12px 2px;padding:10px 14px;max-width:80%;font-size:0.88rem;color:#2d3748">
+  <div style="background:#2d3748;border:1px solid #4a5568;border-radius:12px 12px 12px 2px;padding:10px 14px;max-width:80%;font-size:0.88rem;color:#e2e8f0">
     {display_text}
   </div>
 </div>""")
-    return f'<div style="height:300px;overflow-y:auto;padding:8px">' + "".join(parts) + "</div>"
+    return f'<div style="height:300px;overflow-y:auto;padding:8px;background:#1a202c;border-radius:8px">' + "".join(parts) + "</div>"
+
 
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estimator") as demo:
 
-    # session state — stores logged-in username, empty string = not logged in
-    current_user = gr.State("")
+    current_user       = gr.State("")
     correction_history = gr.State([])
     manual_history     = gr.State([])
 
     gr.HTML("""
         <div style="text-align:center;padding:28px 0 12px">
-          <h1 style="font-size:2rem;font-weight:800;color:#1a202c;margin:0">Food Calorie Estimator</h1>
+          <h1 style="font-size:2rem;font-weight:800;color:#e2e8f0;margin:0">Food Calorie Estimator</h1>
           <p style="color:#718096;margin:8px 0 0;font-size:1rem">Upload or photograph your meal for instant nutrition analysis</p>
         </div>
     """)
 
-    # ── Auth panel (shown when not logged in) ─────────────────────────────────
     with gr.Column(visible=True) as auth_panel:
         with gr.Tabs():
             with gr.Tab("🔑 Login"):
@@ -909,26 +900,25 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
                 login_status     = gr.HTML("")
 
             with gr.Tab("📝 Register"):
-                reg_user_input = gr.Textbox(label="Choose a username", placeholder="min 3 characters")
-                reg_pass_input = gr.Textbox(label="Choose a password", type="password", placeholder="min 6 characters")
+                reg_user_input   = gr.Textbox(label="Choose a username", placeholder="min 3 characters")
+                reg_pass_input   = gr.Textbox(label="Choose a password", type="password", placeholder="min 6 characters")
                 reg_pass_confirm = gr.Textbox(label="Confirm password", type="password")
-                reg_btn        = gr.Button("Create Account", variant="primary")
-                reg_status     = gr.HTML("")
+                reg_btn          = gr.Button("Create Account", variant="primary")
+                reg_status       = gr.HTML("")
 
-    # ── Main app (shown when logged in) ──────────────────────────────────────
     with gr.Column(visible=False) as main_panel:
-        
+
         welcome_html = gr.HTML("")
 
         with gr.Tabs():
             with gr.Tab("📷 Analyze"):
                 with gr.Row():
                     with gr.Column(scale=1):
-                        input_image = gr.Image(sources=["upload", "webcam"], type="pil", label="Your meal", height=380)
-                        analyze_btn = gr.Button("Analyze Meal", variant="primary", size="lg")
+                        input_image  = gr.Image(sources=["upload", "webcam"], type="pil", label="Your meal", height=380)
+                        analyze_btn  = gr.Button("Analyze Meal", variant="primary", size="lg")
                         log_btn      = gr.Button("📋 Log Meal", variant="secondary", size="sm", visible=False)
                         disagree_btn = gr.Button("✏️ Disagree? Adjust with AI", variant="secondary", size="sm", visible=False)
-                        status_html = gr.HTML("")
+                        status_html  = gr.HTML("")
 
                     with gr.Column(scale=1):
                         output_image = gr.Image(label="Detected items", interactive=False, height=380, visible=False)
@@ -947,12 +937,11 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
                     correction_chat_display = gr.HTML("")
                     correction_input = gr.Textbox(
                         placeholder="Tell me what's wrong or what you actually ate...",
-                        label="",
-                        show_label=False
+                        label="", show_label=False
                     )
                     with gr.Row():
-                        correction_send_btn    = gr.Button("Send", variant="primary", size="sm")
-                        correction_close_btn   = gr.Button("Cancel", size="sm")
+                        correction_send_btn  = gr.Button("Send", variant="primary", size="sm")
+                        correction_close_btn = gr.Button("Cancel", size="sm")
                     correction_confirm_html = gr.HTML("", visible=False)
                     correction_confirm_btn  = gr.Button("✓ Log this meal", variant="primary")
 
@@ -967,8 +956,7 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
                     manual_chat_display = gr.HTML("")
                     manual_input = gr.Textbox(
                         placeholder="Describe what you ate, e.g. 'bowl of oatmeal with banana for breakfast'",
-                        label="",
-                        show_label=False
+                        label="", show_label=False
                     )
                     with gr.Row():
                         manual_send_btn  = gr.Button("Send", variant="primary", size="sm")
@@ -978,7 +966,7 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
                     manual_status_html  = gr.HTML("")
 
             with gr.Tab("👤 Profile"):
-                profile_intro = gr.HTML("<div style='margin-bottom:16px;font-size:0.9rem;color:#718096'>Set up your profile to get personalized calorie targets.</div>")
+                gr.HTML("<div style='margin-bottom:16px;font-size:0.9rem;color:#718096'>Set up your profile to get personalized calorie targets.</div>")
 
                 with gr.Row():
                     age_input    = gr.Number(label="Age", value=25, precision=0)
@@ -992,7 +980,7 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
                     goal_weight_input = gr.Number(label="Goal weight (kg)", value=65)
                     goal_date_input   = gr.Textbox(
                         label="Goal date (YYYY-MM-DD)",
-                        placeholder="e.g. 2025-12-31",
+                        placeholder="e.g. 2026-12-31",
                         value=(date.today().replace(year=date.today().year + 1)).isoformat()
                     )
 
@@ -1015,7 +1003,8 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
             with gr.Tab("🚪 Logout"):
                 logout_btn = gr.Button("Logout", variant="stop")
 
-    # Auth handlers
+    # ── Click handlers ────────────────────────────────────────────────────────
+
     login_btn.click(
         fn=do_login,
         inputs=[login_user_input, login_pass_input],
@@ -1034,7 +1023,6 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
         outputs=[current_user, auth_panel, main_panel, welcome_html],
     )
 
-    # Load dashboard when tab is opened
     refresh_btn.click(
         fn=load_dashboard,
         inputs=[current_user],
@@ -1050,9 +1038,9 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
     save_profile_btn.click(
         fn=on_save_profile,
         inputs=[age_input, gender_input, height_input, weight_input,
-                    goal_weight_input, goal_date_input, activity_input, current_user],
+                goal_weight_input, goal_date_input, activity_input, current_user],
         outputs=[profile_status, profile_result, dashboard_html],
-        )
+    )
 
     update_weight_btn.click(
         fn=on_update_weight,
@@ -1060,7 +1048,6 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
         outputs=[update_weight_status],
     )
 
-    # Correction chat
     analyze_btn.click(
         fn=analyze_image,
         inputs=[input_image],
@@ -1098,7 +1085,6 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
         outputs=[correction_chat_panel, correction_history, correction_chat_display],
     )
 
-    # Manual logging chat
     manual_log_btn.click(
         fn=open_manual_chat,
         inputs=[],
@@ -1124,7 +1110,6 @@ with gr.Blocks(css=CUSTOM_CSS, theme=gr.themes.Base(), title="Food Calorie Estim
         inputs=[],
         outputs=[manual_chat_panel, manual_history, manual_chat_display],
     )
-
 
 
 if __name__ == "__main__":

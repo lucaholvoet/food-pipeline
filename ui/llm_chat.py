@@ -2,6 +2,7 @@ import os
 import json
 from google import genai
 from google.genai import types
+from datetime import date, timedelta
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 MAX_TURNS = 6  # max back-and-forth messages
@@ -144,7 +145,15 @@ def chat_manual(history: list, user_message: str, default_date: str) -> tuple[li
     """
     client = _get_client()
 
-    system = MANUAL_SYSTEM_PROMPT + f"\n\nDefault date if not specified: {default_date}"
+    today = date.today()
+    # Calculate recent weekdays for context
+    days_context = "\n\nDate context:"
+    days_context += f"\n- Today is {today.strftime('%A %d %B %Y')} ({today.isoformat()})"
+    for i in range(1, 8):
+        past = today - timedelta(days=i)
+        days_context += f"\n- {past.strftime('%A')} was {past.strftime('%d %B %Y')} ({past.isoformat()})"
+
+    system = MANUAL_SYSTEM_PROMPT + days_context
 
     messages = []
     for msg in history:

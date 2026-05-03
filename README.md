@@ -59,14 +59,29 @@ Photo → YOLOv8 Detection → EfficientNet-B0 Classification → MiDaS Depth
 
 ---
 
+## Documentation
+
+Full documentation is in the [`docs/`](docs/) folder:
+
+| Document | Description |
+|----------|-------------|
+| [Pipeline Guide](docs/PIPELINE_GUIDE.md) | Complete technical reference — data sources, CV pipeline, VLM pipeline, API, output formats |
+| [Project Report](docs/report.md) | Academic report — objectives, methodology, experiments, results, discussion |
+| [User Manual](docs/USER_MANUAL.md) | How to use the app — analyzing meals, logging, dashboard, profile, troubleshooting |
+| [Run & Test Guide](docs/RUN_AND_TEST_GUIDE.md) | Setup, installation, running scripts, evaluation, troubleshooting |
+
+---
+
 ## Project Structure
 
 ```
 food-pipeline/
 ├── pipeline.py                  # Main orchestrator
 ├── api/
-│   ├── main.py                  # FastAPI POST /analyze endpoint
-│   └── models.py                # CVPipelineOutput Pydantic model
+│   ├── app.py                   # FastAPI application (POST /analyze)
+│   ├── main.py                  # Uvicorn launcher
+│   ├── models.py                # Pydantic response models
+│   └── run.py                   # Alternative entry point
 ├── detector/
 │   └── detector.py              # YOLOv8n-seg wrapper
 ├── classifier/
@@ -77,9 +92,11 @@ food-pipeline/
 ├── nutrition/
 │   └── nutrition.py             # FAISS USDA lookup
 ├── vlm/
-│   ├── refiner.py               # VLMRefiner — calls Gemini Flash
-│   ├── schemas.py               # Pydantic schemas (VLMRequest, VLMResponse)
-│   └── client.py                # google-genai SDK client
+│   ├── refiner.py               # VLM refiner orchestrator
+│   ├── schemas.py               # Pydantic input/output models
+│   ├── prompts.py               # Prompt templates (full + fast)
+│   ├── client.py                # Gemini/Gemma API client (dual backend)
+│   └── normalization.py         # Food label normalization
 ├── ui/
 │   ├── app.py                   # Gradio frontend
 │   ├── db.py                    # SQLite meal logging
@@ -88,15 +105,21 @@ food-pipeline/
 │   ├── llm_chat.py              # Gemini chat for correction + manual logging
 │   ├── Dockerfile
 │   └── requirements.txt
+├── scripts/                     # Evaluation, testing, and visualization scripts
+├── data/
+│   ├── eval/                    # 10 evaluation food images
+│   ├── eval_results.json        # VLM evaluation results
+│   └── usda/                    # USDA data & FAISS index (not in git)
+├── output/                      # Generated visualizations (t-SNE, Grad-CAM, etc.)
 ├── models/                      # Model weights (not in git — see setup)
 │   ├── yolov8n_food_best.pt
 │   ├── efficientnet_b0_food101_best.pt
-│   └── idx_to_class.json
-├── nutrition/                   # USDA index (not in git — see setup)
-│   ├── usda.index
-│   └── usda_records.json
-├── Dockerfile
-└── docker-compose.yml
+│   └── classifier/
+│       └── idx_to_class.json
+├── docs/                        # Project documentation
+├── Dockerfile                   # CV pipeline container
+├── docker-compose.yml           # Docker orchestration
+└── requirements.txt             # Python dependencies
 ```
 
 ---
@@ -113,16 +136,16 @@ git clone https://github.com/lucaholvoet/food-pipeline.git
 cd food-pipeline
 ```
 
-### 2. Get model weights
-The model weights are not in git (too large). You need:
+### 2. Get model weights & data
+The model weights and nutrition index are not in git (too large). You need:
 ```
 models/yolov8n_food_best.pt
 models/efficientnet_b0_food101_best.pt
-models/idx_to_class.json
-nutrition/usda.index
-nutrition/usda_records.json
+models/classifier/idx_to_class.json
+data/usda/faiss_index.bin
+data/usda/nutrition_records.json
 ```
-Contact the team for access or download links.
+Contact the team for access or download links. See the [Run & Test Guide](docs/RUN_AND_TEST_GUIDE.md) for full setup instructions.
 
 ### 3. Create `.env` file
 ```bash

@@ -13,4 +13,7 @@ data/
 .ipynb_checkpoints/
 
 # OS
-.DS_Store
+.DS_Storedesktop.ini
+**/__pycache__/
+**/.cache/
+*.pyc

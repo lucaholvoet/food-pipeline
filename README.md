@@ -59,29 +59,14 @@ Photo → YOLOv8 Detection → EfficientNet-B0 Classification → MiDaS Depth
 
 ---
 
-## Documentation
-
-Full documentation is in the [`docs/`](docs/) folder:
-
-| Document | Description |
-|----------|-------------|
-| [Pipeline Guide](docs/PIPELINE_GUIDE.md) | Complete technical reference — data sources, CV pipeline, VLM pipeline, API, output formats |
-| [Project Report](docs/report.md) | Academic report — objectives, methodology, experiments, results, discussion |
-| [User Manual](docs/USER_MANUAL.md) | How to use the app — analyzing meals, logging, dashboard, profile, troubleshooting |
-| [Run & Test Guide](docs/RUN_AND_TEST_GUIDE.md) | Setup, installation, running scripts, evaluation, troubleshooting |
-
----
-
 ## Project Structure
 
 ```
 food-pipeline/
 ├── pipeline.py                  # Main orchestrator
 ├── api/
-│   ├── app.py                   # FastAPI application (POST /analyze)
-│   ├── main.py                  # Uvicorn launcher
-│   ├── models.py                # Pydantic response models
-│   └── run.py                   # Alternative entry point
+│   ├── main.py                  # FastAPI POST /analyze endpoint
+│   └── models.py                # CVPipelineOutput Pydantic model
 ├── detector/
 │   └── detector.py              # YOLOv8n-seg wrapper
 ├── classifier/
@@ -90,13 +75,13 @@ food-pipeline/
 │   ├── portion.py               # Portion estimator (plate + MiDaS + density)
 │   └── depth_estimator.py       # MiDaS_small wrapper
 ├── nutrition/
-│   └── nutrition.py             # FAISS USDA lookup
+│   ├── nutrition.py             # FAISS USDA lookup
+│   ├── usda.index               # FAISS index (9,013 entries)
+│   └── usda_records.json        # USDA nutrition records
 ├── vlm/
-│   ├── refiner.py               # VLM refiner orchestrator
-│   ├── schemas.py               # Pydantic input/output models
-│   ├── prompts.py               # Prompt templates (full + fast)
-│   ├── client.py                # Gemini/Gemma API client (dual backend)
-│   └── normalization.py         # Food label normalization
+│   ├── refiner.py               # VLMRefiner — calls Gemini Flash
+│   ├── schemas.py               # Pydantic schemas (VLMRequest, VLMResponse)
+│   └── client.py                # google-genai SDK client
 ├── ui/
 │   ├── app.py                   # Gradio frontend
 │   ├── db.py                    # SQLite meal logging
@@ -105,21 +90,12 @@ food-pipeline/
 │   ├── llm_chat.py              # Gemini chat for correction + manual logging
 │   ├── Dockerfile
 │   └── requirements.txt
-├── scripts/                     # Evaluation, testing, and visualization scripts
-├── data/
-│   ├── eval/                    # 10 evaluation food images
-│   ├── eval_results.json        # VLM evaluation results
-│   └── usda/                    # USDA data & FAISS index (not in git)
-├── output/                      # Generated visualizations (t-SNE, Grad-CAM, etc.)
-├── models/                      # Model weights (not in git — see setup)
-│   ├── yolov8n_food_best.pt
-│   ├── efficientnet_b0_food101_best.pt
-│   └── classifier/
-│       └── idx_to_class.json
-├── docs/                        # Project documentation
+├── models/
+│   ├── yolov8n_food_best.pt           # YOLOv8 weights (6.4MB)
+│   ├── efficientnet_b0_food101_best.pt  # EfficientNet weights (18.3MB)
+│   └── idx_to_class.json              # Food-101 label map
 ├── Dockerfile                   # CV pipeline container
-├── docker-compose.yml           # Docker orchestration
-└── requirements.txt             # Python dependencies
+└── docker-compose.yml           # Docker orchestration
 ```
 
 ---
@@ -136,23 +112,14 @@ git clone https://github.com/lucaholvoet/food-pipeline.git
 cd food-pipeline
 ```
 
-### 2. Get model weights & data
-The model weights and nutrition index are not in git (too large). You need:
-```
-models/yolov8n_food_best.pt
-models/efficientnet_b0_food101_best.pt
-models/classifier/idx_to_class.json
-data/usda/faiss_index.bin
-data/usda/nutrition_records.json
-```
-Contact the team for access or download links. See the [Run & Test Guide](docs/RUN_AND_TEST_GUIDE.md) for full setup instructions.
+All model weights and nutrition data are included in the repo — no separate download needed.
 
-### 3. Create `.env` file
+### 2. Create `.env` file
 ```bash
 echo "GOOGLE_API_KEY=your_key_here" > .env
 ```
 
-### 4. Run
+### 3. Run
 ```bash
 docker-compose up --build
 ```
@@ -221,17 +188,6 @@ When VLM refinement triggers, response includes `refinement_status` and per-item
 - **No GPU** — inference runs on CPU (~1-2 seconds). Server has no GPU.
 - **USDA coverage** — 9,013 entries. Branded and specialty foods often not found.
 - **Login session** — Gradio `gr.State` resets on page reload. Users must log in again after closing the browser.
-
----
-
-## Roadmap
-
-- [ ] MiDaS calibration via Nutrition5k (notebook in `/scripts/`)
-- [ ] Expand USDA to Branded Foods (400k+ entries)
-- [ ] Custom food entries per user
-- [ ] PWA — installable on phone home screen
-- [ ] Retrain classifier with more food classes
-- [ ] Persistent login session
 
 ---
 

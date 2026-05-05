@@ -6,23 +6,11 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Data & models (too large for git)
+# Data (too large for git)
 data/
-models/
-*.pt
-*.pth
-*.onnx
-*.index
 
 # Jupyter
 .ipynb_checkpoints/
 
 # OS
 .DS_Store
-
-# Team-only docs (not for public repo)
-docs/team/
-
-# FAISS index and nutrition data (too large for git)
-nutrition/usda.index
-nutrition/usda_records.json

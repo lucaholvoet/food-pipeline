@@ -6,14 +6,20 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Data (too large for git)
+# Data & models (too large for git)
 data/
+models/
+*.pt
+*.pth
+*.onnx
+*.index
 
 # Jupyter
 .ipynb_checkpoints/
 
 # OS
-.DS_Storedesktop.ini
-**/__pycache__/
-**/.cache/
-*.pyc
+.DS_Store
+
+# FAISS index and nutrition data (too large for git)
+nutrition/usda.index
+nutrition/usda_records.json

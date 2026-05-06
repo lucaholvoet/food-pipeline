@@ -75,9 +75,7 @@ food-pipeline/
 │   ├── portion.py               # Portion estimator (plate + MiDaS + density)
 │   └── depth_estimator.py       # MiDaS_small wrapper
 ├── nutrition/
-│   ├── nutrition.py             # FAISS USDA lookup
-│   ├── usda.index               # FAISS index (9,013 entries)
-│   └── usda_records.json        # USDA nutrition records
+│   └── nutrition.py             # FAISS USDA lookup
 ├── vlm/
 │   ├── refiner.py               # VLMRefiner — calls Gemini Flash
 │   ├── schemas.py               # Pydantic schemas (VLMRequest, VLMResponse)
@@ -90,12 +88,15 @@ food-pipeline/
 │   ├── llm_chat.py              # Gemini chat for correction + manual logging
 │   ├── Dockerfile
 │   └── requirements.txt
-├── models/
-│   ├── yolov8n_food_best.pt           # YOLOv8 weights (6.4MB)
-│   ├── efficientnet_b0_food101_best.pt  # EfficientNet weights (18.3MB)
-│   └── idx_to_class.json              # Food-101 label map
-├── Dockerfile                   # CV pipeline container
-└── docker-compose.yml           # Docker orchestration
+├── models/                      # Model weights (not in git — see setup)
+│   ├── yolov8n_food_best.pt
+│   ├── efficientnet_b0_food101_best.pt
+│   └── idx_to_class.json
+├── nutrition/                   # USDA index (not in git — see setup)
+│   ├── usda.index
+│   └── usda_records.json
+├── Dockerfile
+└── docker-compose.yml
 ```
 
 ---
@@ -112,14 +113,23 @@ git clone https://github.com/lucaholvoet/food-pipeline.git
 cd food-pipeline
 ```
 
-All model weights and nutrition data are included in the repo — no separate download needed.
+### 2. Get model weights
+The model weights are not in git (too large). You need:
+```
+models/yolov8n_food_best.pt
+models/efficientnet_b0_food101_best.pt
+models/idx_to_class.json
+nutrition/usda.index
+nutrition/usda_records.json
+```
+Contact the team for access or download links.
 
-### 2. Create `.env` file
+### 3. Create `.env` file
 ```bash
 echo "GOOGLE_API_KEY=your_key_here" > .env
 ```
 
-### 3. Run
+### 4. Run
 ```bash
 docker-compose up --build
 ```
@@ -188,6 +198,17 @@ When VLM refinement triggers, response includes `refinement_status` and per-item
 - **No GPU** — inference runs on CPU (~1-2 seconds). Server has no GPU.
 - **USDA coverage** — 9,013 entries. Branded and specialty foods often not found.
 - **Login session** — Gradio `gr.State` resets on page reload. Users must log in again after closing the browser.
+
+---
+
+## Roadmap
+
+- [ ] MiDaS calibration via Nutrition5k (notebook in `/scripts/`)
+- [ ] Expand USDA to Branded Foods (400k+ entries)
+- [ ] Custom food entries per user
+- [ ] PWA — installable on phone home screen
+- [ ] Retrain classifier with more food classes
+- [ ] Persistent login session
 
 ---
 

@@ -1,339 +1,275 @@
-"""
-Food Calorie & Nutrient Estimator — Main Pipeline
-
-This is the main pipeline orchestrator. It ties together:
-- Detection (YOLOv8)
-- Classification (EfficientNet-B0)
-- Portion estimation (MiDaS + density table)
-- Nutrition lookup (FAISS)
-- VLM refinement (Gemini/Gemma)
-
-Usage:
-    from pipeline import FoodPipeline
-    
-    pipeline = FoodPipeline()
-    result = pipeline.analyze_image(image_path)
-"""
-
 import os
-import sys
-from pathlib import Path
-from typing import Optional, Union
-import uuid
 import time
+import uuid
 import base64
 import numpy as np
 from PIL import Image
-import io
+from io import BytesIO
 
-# Add project root to path
-PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
-# Import all modules
 from detector.detector import FoodDetector
 from classifier.classifier import FoodClassifier
 from portion.portion import PortionEstimator
-from portion.depth_estimator import DepthEstimator
 from nutrition.nutrition import NutritionLookup
-from vlm.refiner import VLMRefiner
+from api.models import CVPipelineOutput, FoodItem, NutritionValues, TopPrediction
 
-from pipeline.schemas import (
-    CVPipelineOutput,
-    CVItem,
-    CVNutrition,
-)
+from vlm.refiner import VLMRefiner
 from vlm.schemas import VLMRequest, RefinementReason
 
-# Constants
-CONFIDENCE_THRESHOLD = 0.70
-MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
-USDA_DIR = os.path.join(PROJECT_ROOT, "data", "usda")
-
+VLM_CONFIDENCE_THRESHOLD = 0.70
 
 class FoodPipeline:
-    """Complete food analysis pipeline."""
-
     def __init__(
         self,
-        detector: Optional[FoodDetector] = None,
-        classifier: Optional[FoodClassifier] = None,
-        portion_estimator: Optional[PortionEstimator] = None,
-        depth_estimator: Optional[DepthEstimator] = None,
-        nutrition_lookup: Optional[NutritionLookup] = None,
-        vlm_refiner: Optional[VLMRefiner] = None,
-        confidence_threshold: float = CONFIDENCE_THRESHOLD,
+        detector_path: str = "models/yolov8n_food_best.pt",
+        classifier_path: str = "models/efficientnet_b0_food101_best.pt",
+        labels_path: str = "models/idx_to_class.json",
+        index_path: str = "nutrition/usda.index",
+        records_path: str = "nutrition/usda_records.json",
+        device: str = "cpu",
+        use_vlm: bool = True
     ):
-        """Initialize the pipeline with optional components."""
-        self.detector = detector or FoodDetector()
-        self.classifier = classifier or FoodClassifier()
-        self.portion_estimator = portion_estimator or PortionEstimator()
-        self.depth_estimator = depth_estimator or DepthEstimator()
-        self.nutrition_lookup = nutrition_lookup or NutritionLookup()
-        self.vlm_refiner = vlm_refiner
-        self.confidence_threshold = confidence_threshold
+        print("Loading detector...")
+        self.detector = FoodDetector(detector_path, device=device)
+        print("Loading classifier...")
+        self.classifier = FoodClassifier(classifier_path, labels_path, device=device)
+        print("Loading portion estimator...")
 
-    def analyze_image(self, image_input: Union[str, bytes, np.ndarray, Image.Image]) -> CVPipelineOutput:
-        """
-        Analyze a food image through the complete pipeline.
-        
-        Args:
-            image_input: Image as path, bytes, numpy array, or PIL Image
-            
-        Returns:
-            CVPipelineOutput with all analysis results
-        """
-        start_time = time.time()
-        
-        # ── Load image ──
-        if isinstance(image_input, (str, bytes)):
-            image = Image.open(io.BytesIO(image_input) if isinstance(image_input, bytes) else image_input)
-        elif isinstance(image_input, np.ndarray):
-            image = Image.fromarray(image_input)
-        else:
-            image = image_input
-            
-        image_id = str(uuid.uuid4())
-        
-        # ── Detection ──
+        self.portion = PortionEstimator()
+        # MiDaS depth estimator (optional — graceful fallback if unavailable)
         try:
-            detection_results = self.detector.detect(image)
-            food_detections = [d for d in detection_results if d["class"] == "food"]
-            plate_detections = [d for d in detection_results if d["class"] == "plate"]
-            plate_detected = len(plate_detections) > 0
-        except Exception:
-            # Fallback to single item at center
-            food_detections = [{
-                "bbox": [image.width * 0.25, image.height * 0.25, 
-                         image.width * 0.75, image.height * 0.75],
-                "mask_area": image.width * image.height * 0.5,
-                "detection_confidence": 0.8,
-                "class": "food"
-            }]
-            plate_detected = False
-            
-        # ── Depth estimation (if available) ──
-        try:
-            depth_map = self.depth_estimator.estimate_depth(image)
-            depth_available = True
-        except Exception:
-            depth_map = None
-            depth_available = False
-            
-        # ── Process each food item ──
-        items = []
-        for i, detection in enumerate(food_detections):
-            item_result = self._process_food_item(
-                image=image,
-                detection=detection,
-                plate_detections=plate_detections,
-                depth_map=depth_map,
-                item_id=i + 1
-            )
-            items.append(item_result)
-            
-        # ── Calculate totals ──
-        totals = self._calculate_totals(items)
-        
-        # ── Calculate average confidence ──
-        avg_confidence = np.mean([item.classification_confidence for item in items]) if items else 0.0
-        
-        # ── Check for VLM refinement ──
-        requires_vlm = (avg_confidence < self.confidence_threshold) or (not plate_detected)
-        vlm_result = None
-        
-        if requires_vlm and self.vlm_refiner:
+            from portion.depth_estimator import DepthEstimator
+            self.depth_estimator = DepthEstimator()
+            print("MiDaS depth estimator ready.")
+        except Exception as e:
+            print(f"MiDaS not available: {e}. Using density table only.")
+            self.depth_estimator = None
+
+        print("Loading nutrition lookup...")
+        self.nutrition = NutritionLookup(index_path, records_path, device=device)
+
+        if use_vlm:
             try:
-                # Convert image to base64 for VLM
-                buffered = io.BytesIO()
-                image.save(buffered, format="JPEG")
-                image_base64 = base64.b64encode(buffered.getvalue()).decode()
-                
-                # Build CV output for VLM
-                cv_output = CVPipelineOutput(
-                    image_id=image_id,
-                    status="success",
-                    warnings=[],
-                    average_confidence=avg_confidence,
-                    plate_detected=plate_detected,
-                    items=items,
-                    totals=totals,
-                )
-                
-                # Create VLM request
-                vlm_request = VLMRequest(
-                    image_base64=image_base64,
-                    reason=RefinementReason.low_confidence if avg_confidence < self.confidence_threshold else RefinementReason.no_plate,
-                    trigger_threshold=self.confidence_threshold,
-                    cv_output=cv_output,
-                )
-                
-                # Run VLM refinement
-                vlm_result = self.vlm_refiner.refine(vlm_request)
-                
+                self.refiner = VLMRefiner(backend="google", model="gemini-flash-latest", api_key=os.environ.get("GOOGLE_API_KEY"),)
+                print("VLM refiner ready.")
             except Exception as e:
-                print(f"VLM refinement failed: {e}")
+                print(f"VLM not available: {e}. Running CV-only.")
+                self.refiner = None
+        else:
+            self.refiner = None
+
+        print("Pipeline ready.")
+
+    def _image_to_base64(self, image: Image.Image) -> str:
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    def _compute_totals(self, items: list[FoodItem]) -> NutritionValues:
+        return NutritionValues(
+            calories_kcal=round(sum(i.nutrition_total.calories_kcal for i in items), 1),
+            protein_g=round(sum(i.nutrition_total.protein_g for i in items), 1),
+            fat_g=round(sum(i.nutrition_total.fat_g for i in items), 1),
+            carbs_g=round(sum(i.nutrition_total.carbs_g for i in items), 1),
+            fiber_g=round(sum(i.nutrition_total.fiber_g for i in items), 1),
+        )
+
+    def run(self, image: Image.Image) -> CVPipelineOutput:
+        start_time = time.time()
+        image_id = str(uuid.uuid4())
+        warnings = []
+
+        # Step 1 — detect
+        detection = self.detector.detect(image)
+        food_items_raw = detection["food_items"]
+        plate_mask = detection["plate_mask"]
+        plate_detected = detection["plate_detected"]
+        img_w, img_h = detection["image_size"]
+
+        if not plate_detected:
+            warnings.append("no_plate_detected")
+
+        if not food_items_raw:
+            warnings.append("no_food_detected")
+            return CVPipelineOutput(
+                image_id=image_id,
+                image_base64=self._image_to_base64(image),
+                status="no_food_detected",
+                warnings=warnings,
+                requires_vlm_refinement=True,
+                plate_detected=plate_detected,
+                processing_time_ms=int((time.time() - start_time) * 1000)
+            )
         
-        # ── Build final output ──
-        elapsed_ms = int((time.time() - start_time) * 1000)
-        
-        output = CVPipelineOutput(
+        # MiDaS depth map
+        depth_map = None
+        if self.depth_estimator is not None:
+            try:
+                depth_map = self.depth_estimator.get_depth_map(image)
+            except Exception as e:
+                warnings.append(f"depth_estimation_failed: {str(e)}")
+
+        # Compute scale
+        scale_cm_per_px = 0.0
+        if plate_detected and plate_mask is not None:
+            plate_px = float(plate_mask.sum())
+            if plate_px > 0:
+                plate_radius_px = np.sqrt(plate_px / np.pi)
+                scale_cm_per_px = round(13.0 / plate_radius_px, 5)
+
+        # Step 2 — classify + portion + nutrition per item
+        items = []
+        confidence_scores = []
+
+        for idx, raw in enumerate(food_items_raw):
+            crop = raw["crop"]
+            mask = raw["mask"]
+            bbox = raw["bbox"]
+            detection_conf = raw["detection_confidence"]
+
+            # Classify
+            predictions = self.classifier.predict(crop, top_k=3)
+            top_label = predictions[0]["label"]
+            class_conf = predictions[0]["confidence"]
+            confidence_scores.append(class_conf)
+            confidence_scores.append(detection_conf)
+
+            # Portion
+            portion_result = self.portion.estimate(top_label, mask, plate_mask, depth_map=depth_map)
+            grams = portion_result["estimated_grams"]
+            portion_method = portion_result["portion_method"]
+
+            # Nutrition
+            nutrition_100g = self.nutrition.get_nutrition(
+                top_label.replace("_", " ")
+            )
+
+            if not nutrition_100g:
+                warnings.append(f"no_nutrition_found_for_{top_label}")
+                nutrition_100g = {
+                    "calories_kcal": 0, "protein_g": 0,
+                    "fat_g": 0, "carbs_g": 0, "fiber_g": 0
+                }
+
+            factor = grams / 100.0
+            nutrition_total = {
+                k: round(v * factor, 1)
+                for k, v in nutrition_100g.items()
+            }
+
+            items.append(FoodItem(
+                item_id=idx + 1,
+                food_name=top_label,
+                display_name=predictions[0]["display_name"],
+                classification_confidence=round(class_conf, 4),
+                detection_confidence=round(detection_conf, 4),
+                top3_predictions=[
+                    TopPrediction(
+                        label=p["label"],
+                        confidence=round(p["confidence"], 4)
+                    ) for p in predictions
+                ],
+                estimated_grams=grams,
+                portion_method=portion_method,
+                bbox=bbox,
+                nutrition_per_100g=NutritionValues(
+                    calories_kcal=round(nutrition_100g.get("calories_kcal", 0), 2),
+                    protein_g=round(nutrition_100g.get("protein_g", 0), 2),
+                    fat_g=round(nutrition_100g.get("fat_g", 0), 2),
+                    carbs_g=round(nutrition_100g.get("carbs_g", 0), 2),
+                    fiber_g=round(nutrition_100g.get("fiber_g", 0), 2),
+                ),
+                nutrition_total=NutritionValues(
+                calories_kcal=round(nutrition_total.get("calories_kcal", 0), 2),
+                protein_g=round(nutrition_total.get("protein_g", 0), 2),
+                fat_g=round(nutrition_total.get("fat_g", 0), 2),
+                carbs_g=round(nutrition_total.get("carbs_g", 0), 2),
+                fiber_g=round(nutrition_total.get("fiber_g", 0), 2),
+            )
+            ))
+
+        # Step 3 — compute average confidence and VLM trigger
+        avg_confidence = round(
+            sum(confidence_scores) / len(confidence_scores), 4
+        ) if confidence_scores else 0.0
+
+        requires_vlm = avg_confidence < VLM_CONFIDENCE_THRESHOLD or not plate_detected #estimation is not good without plate detection, try to improve portion estimation part
+
+        if requires_vlm:
+            warnings.append("low_confidence_vlm_triggered")
+
+        # Step 4 — build output
+        totals = self._compute_totals(items)
+        processing_ms = int((time.time() - start_time) * 1000)
+
+        result = CVPipelineOutput(
             image_id=image_id,
+            image_base64=self._image_to_base64(image),
             status="success",
-            warnings=[] if not requires_vlm else ["Low confidence - VLM refinement recommended"],
+            warnings=warnings,
+            requires_vlm_refinement=requires_vlm,
             average_confidence=avg_confidence,
             plate_detected=plate_detected,
+            scale_cm_per_px=scale_cm_per_px,
             items=items,
             totals=totals,
-            processing_time_ms=elapsed_ms,
-            vlm_refinement=vlm_result,
-        )
-        
-        return output
-
-    def _process_food_item(
-        self,
-        image: Image.Image,
-        detection: dict,
-        plate_detections: list,
-        depth_map: Optional[np.ndarray],
-        item_id: int
-    ) -> CVItem:
-        """Process a single detected food item."""
-        
-        # ── Extract bbox and crop ──
-        bbox = detection["bbox"]
-        food_crop = image.crop(bbox).convert("RGB")
-        
-        # ── Classification ──
-        try:
-            preds = self.classifier.predict(food_crop, top_k=3)
-            food_name = preds[0]["label"]
-            display_name = preds[0]["display_name"]
-            confidence = preds[0]["confidence"]
-            top3 = preds
-        except Exception:
-            # Fallback
-            food_name = "unknown"
-            display_name = "Unknown"
-            confidence = 0.5
-            top3 = [{"label": "unknown", "confidence": 0.5}]
-            
-        # ── Portion estimation ──
-        try:
-            # Create food mask (simplified)
-            food_mask = np.zeros((image.height, image.width), dtype=np.uint8)
-            x1, y1, x2, y2 = bbox
-            food_mask[y1:y2, x1:x2] = 255
-            
-            # Create plate mask if available
-            plate_mask = np.zeros((image.height, image.width), dtype=np.uint8)
-            if plate_detections:
-                plate_bbox = plate_detections[0]["bbox"]
-                px1, py1, px2, py2 = plate_bbox
-                plate_mask[py1:py2, px1:px2] = 255
-            
-            # Estimate portion
-            portion_result = self.portion_estimator.estimate(
-                food_label=food_name,
-                mask=food_mask,
-                plate_mask=plate_mask if plate_detected else None,
-                depth_map=depth_map,
-            )
-            estimated_grams = portion_result["estimated_grams"]
-            portion_method = portion_result["portion_method"]
-        except Exception:
-            # Fallback
-            estimated_grams = 250.0
-            portion_method = "fallback"
-            
-        # ── Nutrition lookup ──
-        try:
-            nutrition_per_100g = self.nutrition_lookup.get_nutrition(food_name)
-        except Exception:
-            # Fallback nutrition
-            nutrition_per_100g = CVNutrition(
-                calories_kcal=150,
-                protein_g=5.0,
-                fat_g=4.0,
-                carbs_g=22.0,
-                fiber_g=1.0,
-            )
-            
-        # ── Scale nutrition to portion ──
-        scale = estimated_grams / 100.0
-        nutrition_total = CVNutrition(
-            calories_kcal=round(nutrition_per_100g.calories_kcal * scale, 1),
-            protein_g=round(nutrition_per_100g.protein_g * scale, 1),
-            fat_g=round(nutrition_per_100g.fat_g * scale, 1),
-            carbs_g=round(nutrition_per_100g.carbs_g * scale, 1),
-            fiber_g=round(nutrition_per_100g.fiber_g * scale, 1),
-        )
-        
-        return CVItem(
-            item_id=item_id,
-            food_name=food_name,
-            display_name=display_name,
-            classification_confidence=confidence,
-            top3_predictions=top3,
-            bbox=bbox,
-            detection_confidence=detection["detection_confidence"],
-            estimated_grams=estimated_grams,
-            portion_method=portion_method,
-            nutrition_per_100g=nutrition_per_100g,
-            nutrition_total=nutrition_total,
+            processing_time_ms=processing_ms
         )
 
-    def _calculate_totals(self, items: list[CVItem]) -> CVNutrition:
-        """Sum nutrition across all items."""
-        totals = CVNutrition(
-            calories_kcal=0,
-            protein_g=0,
-            fat_g=0,
-            carbs_g=0,
-            fiber_g=0,
-        )
-        
-        for item in items:
-            nt = item.nutrition_total
-            totals.calories_kcal += nt.calories_kcal
-            totals.protein_g += nt.protein_g
-            totals.fat_g += nt.fat_g
-            totals.carbs_g += nt.carbs_g
-            totals.fiber_g += nt.fiber_g
-            
-        # Round totals
-        totals.calories_kcal = round(totals.calories_kcal, 1)
-        totals.protein_g = round(totals.protein_g, 1)
-        totals.fat_g = round(totals.fat_g, 1)
-        totals.carbs_g = round(totals.carbs_g, 1)
-        totals.fiber_g = round(totals.fiber_g, 1)
-        
-        return totals
+        if result.requires_vlm_refinement and self.refiner is not None:
+            try:
+                from vlm.schemas import (
+                    CVOutput, CVItem, CVNutrition, CVTopPrediction
+                )
 
+                def to_cv_nutrition(n: NutritionValues) -> CVNutrition:
+                    return CVNutrition(
+                        calories_kcal=n.calories_kcal,
+                        protein_g=n.protein_g,
+                        fat_g=n.fat_g,
+                        carbs_g=n.carbs_g,
+                        fiber_g=n.fiber_g,
+                    )
 
-def create_pipeline() -> FoodPipeline:
-    """Create a pipeline instance with all components."""
-    return FoodPipeline(
-        detector=FoodDetector(),
-        classifier=FoodClassifier(),
-        portion_estimator=PortionEstimator(),
-        depth_estimator=DepthEstimator(),
-        nutrition_lookup=NutritionLookup(),
-        vlm_refiner=VLMRefiner(),
-    )
+                cv_items = [
+                    CVItem(
+                        item_id=item.item_id,
+                        food_name=item.food_name,
+                        display_name=item.display_name,
+                        classification_confidence=item.classification_confidence,
+                        detection_confidence=item.detection_confidence,
+                        top3_predictions=[
+                            CVTopPrediction(
+                                label=p.label,
+                                confidence=p.confidence,
+                            )
+                            for p in item.top3_predictions
+                        ],
+                        estimated_grams=item.estimated_grams,
+                        portion_method=item.portion_method,
+                        bbox=item.bbox,
+                        nutrition_per_100g=to_cv_nutrition(item.nutrition_per_100g),
+                        nutrition_total=to_cv_nutrition(item.nutrition_total),
+                    )
+                    for item in result.items
+                ]
 
+                cv_output = CVOutput(
+                    image_id=result.image_id,
+                    status=result.status,
+                    average_confidence=result.average_confidence,
+                    plate_detected=result.plate_detected,
+                    items=cv_items,
+                    totals=to_cv_nutrition(result.totals),
+                )
 
-if __name__ == "__main__":
-    # Quick test
-    pipeline = create_pipeline()
-    print("Pipeline created successfully!")
-    
-    # Test with a sample image if available
-    test_image_path = os.path.join(PROJECT_ROOT, "data", "sample", "pizza.jpg")
-    if os.path.exists(test_image_path):
-        result = pipeline.analyze_image(test_image_path)
-        print(f"Analyzed {result.image_id}: {len(result.items)} items found")
-    else:
-        print("No test image found at data/sample/pizza.jpg")
+                vlm_request = VLMRequest(
+                    image_base64=result.image_base64,
+                    reason=RefinementReason.LOW_CONFIDENCE,
+                    trigger_threshold=VLM_CONFIDENCE_THRESHOLD,
+                    cv_output=cv_output,
+                )
+                return self.refiner.refine(vlm_request)
+            except Exception as e:
+                result.warnings.append(f"vlm_failed: {str(e)}")
+
+        return result

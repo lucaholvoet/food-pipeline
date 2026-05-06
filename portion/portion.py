@@ -144,7 +144,7 @@ class PortionEstimator:
                 # relative height: difference between food surface and background
                 height_relative = float(food_depths.mean() - food_depths.min())
                 # scale relative depth to cm (calibrated: 1.0 relative ~ 8cm max height)
-                height_cm = max(0.5, min(height_relative * 4.0, 20.0))
+                height_cm = max(0.5, min(height_relative * 8.0, 20.0))
                 portion_method = portion_method + "_midas"
             else:
                 height_cm = props["height_cm"]

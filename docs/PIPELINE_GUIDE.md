@@ -441,8 +441,8 @@ pipeline = FoodPipeline(
     detector_path="models/yolov8n_food_best.pt",
     classifier_path="models/efficientnet_b0_food101_best.pt",
     labels_path="models/idx_to_class.json",
-    index_path="data/usda/faiss_index.bin",
-    records_path="data/usda/nutrition_records.json",
+    index_path="nutrition/usda.index",
+    records_path="nutrition/usda_records.json",
     device="cpu",
     use_vlm=True
 )

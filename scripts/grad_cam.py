@@ -6,7 +6,7 @@ Covers: Lab 2 — CNN Interpretation (Grad-CAM, Saliency Maps)
 
 Requirements:
   - Model weights: models/efficientnet_b0_food101_best.pt
-  - Class labels: models/classifier/idx_to_class.json
+  - Class labels: models/idx_to_class.json
   - Test images in data/eval/
 
 Run:
@@ -38,7 +38,7 @@ import matplotlib.pyplot as plt
 MODEL_PATH = os.path.join(PROJECT, "models",
     "efficientnet_b0_food101_best.pt")
 LABELS_PATH = os.path.join(PROJECT, "models",
-    "classifier", "idx_to_class.json")
+    "idx_to_class.json")
 EVAL_DIR = os.path.join(PROJECT, "data", "eval")
 OUTPUT_DIR = os.path.join(PROJECT, "output")
 

@@ -2,7 +2,7 @@
 
 A full-stack AI-powered food calorie estimation system. Take a photo of your meal and get instant per-item nutritional analysis — calories, protein, fat, carbs, and fiber. Built with computer vision, deep learning, and LLM refinement.
 
-**Live demo:** [http://65.109.133.173:7860](http://65.109.133.173:7860)
+**Live demo:** currently unavailable (run locally with Docker using the setup below).
 
 ---
 
@@ -38,7 +38,7 @@ Photo → YOLOv8 Detection → EfficientNet-B0 Classification → MiDaS Depth
 - ✏️ **Manual logging** — describe what you ate in natural language, Gemini estimates nutrition
 - 📊 **Dashboard** — daily calories vs target, 7-day bar chart with dates, meals list
 - 👤 **Profile** — BMR/TDEE calculation, goal date picker, personalized calorie targets
-- 🌐 **Deployed** — accessible from any device, anywhere
+- 🌐 **Dockerized** — ready to run locally or deploy on your own server
 
 ---
 

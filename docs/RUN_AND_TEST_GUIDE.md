@@ -45,14 +45,14 @@ Place these files in the project root:
 ```
 models/yolov8n_food_best.pt
 models/efficientnet_b0_food101_best.pt
-models/classifier/idx_to_class.json
+models/idx_to_class.json
 ```
 
 And the nutrition index:
 
 ```
-data/usda/faiss_index.bin
-data/usda/nutrition_records.json
+nutrition/usda.index
+nutrition/usda_records.json
 ```
 
 > Contact the team for download links if needed.
@@ -80,10 +80,10 @@ docker-compose up --build
 
 ```bash
 # Check API health
-curl http://localhost:8000/
+curl http://localhost:8000/health
 
 # Test with an image
-curl -X POST http://localhost:8000/analyze -F "file=@data/test_food.jpg"
+curl -X POST http://localhost:8000/analyze -F "file=@meal.jpg"
 ```
 
 ---
@@ -143,9 +143,9 @@ Ensure the following files exist:
 ```
 models/yolov8n_food_best.pt
 models/efficientnet_b0_food101_best.pt
-models/classifier/idx_to_class.json
-data/usda/faiss_index.bin
-data/usda/nutrition_records.json
+models/idx_to_class.json
+nutrition/usda.index
+nutrition/usda_records.json
 ```
 
 ---
@@ -157,7 +157,7 @@ data/usda/nutrition_records.json
 **Terminal 1 — Start API:**
 ```bash
 venv\Scripts\activate
-python -m uvicorn api.app:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Terminal 2 — Start UI:**
@@ -177,9 +177,9 @@ from pipeline import FoodPipeline
 pipeline = FoodPipeline(
     detector_path="models/yolov8n_food_best.pt",
     classifier_path="models/efficientnet_b0_food101_best.pt",
-    labels_path="models/classifier/idx_to_class.json",
-    index_path="data/usda/faiss_index.bin",
-    records_path="data/usda/nutrition_records.json",
+    labels_path="models/idx_to_class.json",
+    index_path="nutrition/usda.index",
+    records_path="nutrition/usda_records.json",
     use_vlm=True
 )
 
@@ -236,7 +236,7 @@ Runs the complete pipeline (detection → classification → portion → nutriti
 
 ```bash
 # Start the API first in another terminal
-python -m uvicorn api.app:app --port 8000
+python -m uvicorn api.main:app --port 8000
 
 # Run the test
 python scripts/test_api.py
@@ -294,7 +294,7 @@ Rebuilds the FAISS nutrition index from USDA CSV files. Only needed if updating 
 | Problem | Cause | Solution |
 |---------|-------|---------|
 | `ModuleNotFoundError: No module named 'vlm'` | Running from wrong directory | `cd food-pipeline` first |
-| `Cannot connect to backend` | API not running | Start with `uvicorn api.app:app` |
+| `Cannot connect to backend` | API not running | Start with `uvicorn api.main:app` |
 | `CUDA out of memory` | GPU too small for models | Use CPU mode (default) |
 | `GOOGLE_API_KEY not set` | Missing `.env` file | Create `.env` with your key |
 | `FAISS index not found` | Missing nutrition data | Run `scripts/build_usda_index.py` |
@@ -304,7 +304,7 @@ Rebuilds the FAISS nutrition index from USDA CSV files. Only needed if updating 
 
 ```bash
 # API status
-curl http://localhost:8000/status
+curl http://localhost:8000/health
 
 # Docker status
 docker-compose ps

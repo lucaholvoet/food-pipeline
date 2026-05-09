@@ -25,7 +25,7 @@
 
 Open your browser and navigate to:
 - **Local deployment:** `http://localhost:7860`
-- **Live server:** `http://65.109.133.173:7860`
+- **Hosted deployment:** currently unavailable in this repository
 
 ### Creating an Account
 

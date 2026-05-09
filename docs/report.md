@@ -407,7 +407,7 @@ This project successfully built a complete hybrid food recognition and nutrition
 - EfficientNet-B0 classifier: **87.37% accuracy** on Food-101
 - YOLOv8n-seg detector: **mAP50 = 0.934** on FoodSeg103
 - VLM refinement: improved accuracy from **40% to 70%** on ambiguous cases
-- Full web application deployed at `http://65.109.133.173:7860`
+- Full web application is dockerized and can be deployed on a server
 
 The system aligns with core deep learning concepts including CNN classification, embeddings and similarity search, interpretability (Grad-CAM), and multimodal reasoning (VLMs). The project provides a strong foundation for a production-ready meal analysis system.
 

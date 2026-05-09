@@ -1,11 +1,10 @@
 """
-VLM prompt templates tuned for local open-source models.
+VLM Refinement - Prompt Templates (v2)
 
-Design goals:
-- Keep prompts short enough for local multimodal models.
-- Force exact Food-101 labels whenever possible.
-- Reduce generic outputs like "pasta", "burger", or "salad bowl".
-- Keep a fast path for evaluation and a full path for the refiner.
+Improved based on evaluation results:
+- Added full Food-101 class list so VLM uses exact names
+- Added confidence calibration (was stuck at 95%)
+- Added FAST prompts for quick inference
 """
 
 FOOD101_CLASSES = sorted([
@@ -41,117 +40,98 @@ FOOD101_CLASSES = sorted([
 
 FOOD101_LIST_STR = ", ".join(FOOD101_CLASSES)
 
-LABEL_GUIDANCE = """
-Common mappings to valid Food-101 labels:
-- burger -> hamburger
-- cheeseburger -> hamburger
-- cheese pancakes -> pancakes
-- pancake stack -> pancakes
-- pasta with meat sauce -> spaghetti_bolognese
-- creamy pasta -> spaghetti_carbonara
-- noodle soup -> ramen
-- sushi rolls -> sushi
-- ice cream -> ice_cream
-- fries -> french_fries
-- salad bowl with feta/olives/tomato -> greek_salad
-- leafy salad with croutons/parmesan -> caesar_salad
-- salmon fillet -> grilled_salmon
-""".strip()
+SYSTEM_PROMPT = (
+    "You are a food identification expert.\n"
+    "The CV pipeline classifies food into exactly 101 "
+    "categories (Food-101).\n"
+    "CRITICAL: You MUST use one of these EXACT class "
+    "names (lowercase, underscores):\n"
+    f"{FOOD101_LIST_STR}\n\n"
+    "If unsure, pick the CLOSEST match from the list.\n"
+    "Examples: 'burger' -> hamburger, "
+    "'cheese pancakes' -> pancakes, "
+    "'noodle soup' -> ramen.\n\n"
+    "Set vlm_confidence honestly (0.3-1.0), "
+    "NOT always 0.95.\n"
+    "Respond ONLY with JSON."
+)
+
+
+SYSTEM_PROMPT_FULL = (
+    "You are a food identification and nutrition expert.\n"
+    "The CV pipeline classifies food into exactly 101 "
+    "categories (Food-101).\n"
+    "CRITICAL: You MUST use one of these EXACT class "
+    "names (lowercase, underscores):\n"
+    f"{FOOD101_LIST_STR}\n\n"
+    "If unsure, pick the CLOSEST match.\n\n"
+    "Rules:\n"
+    "- food_name MUST be a Food-101 class name\n"
+    "- Be honest about confidence (0.3-1.0)\n"
+    "- nutrition_total = (estimated_grams/100) "
+    "* nutrition_per_100g\n"
+    "Respond ONLY with valid JSON."
+)
+
+USER_PROMPT_TEMPLATE = (
+    "Refine the food analysis for this image.\n\n"
+    "Reason: {reason} (threshold: {threshold}, "
+    "CV confidence: {avg_confidence})\n\n"
+    "CV Pipeline Output:\n"
+    "```json\n{cv_output}\n```\n\n"
+    "For each item, respond with JSON:\n"
+    "{{\n  "
+    '"items": [\n    {{\n      '
+    '"item_id": <same>,\n      '
+    '"action": "confirmed" | "corrected",\n      '
+    '"original": {{"food_name": "<cv>", '
+    '"classification_confidence": <val>}},\n      '
+    '"refined": {{"food_name": '
+    '"<MUST be Food-101 class name>", '
+    '"display_name": "<readable>", '
+    '"vlm_confidence": <0.3-1.0>, '
+    '"food_description": "<desc>"}},\n      '
+    '"portion": {{"estimated_grams": <val>, '
+    '"portion_method": "vlm_visual_estimate", '
+    '"vlm_confidence": <0.3-1.0>}},\n      '
+    '"nutrition_per_100g": '
+    '{{"calories_kcal":<v>, "protein_g":<v>, '
+    '"fat_g":<v>, "carbs_g":<v>, "fiber_g":<v>}},\n      '
+    '"nutrition_total": '
+    '{{"calories_kcal":<v>, "protein_g":<v>, '
+    '"fat_g":<v>, "carbs_g":<v>, "fiber_g":<v>}}\n    '
+    '}}\n  ]\n}}\n\n'
+    "IMPORTANT: food_name MUST be from the "
+    "Food-101 list. Respond ONLY JSON."
+)
+
 
 FAST_SYSTEM_PROMPT = (
-    "You are a food recognition assistant correcting a weak CV prediction. "
-    "Use one exact Food-101 class name when possible. "
-    f"Valid classes: {FOOD101_LIST_STR}.\n\n"
-    "Rules:\n"
-    "- Return JSON only.\n"
-    "- food_name should be an exact Food-101 label.\n"
-    "- If the image does not perfectly match, choose the closest Food-101 label.\n"
-    "- Avoid generic names like burger, pasta, salad, noodle soup, cake, or ice cream.\n"
-    f"{LABEL_GUIDANCE}\n\n"
-    "Return exactly this shape:\n"
-    '{"items":[{"item_id":1,"action":"confirmed or corrected","food_name":"exact_label","display_name":"Readable Name","vlm_confidence":0.78,"food_description":"short description","estimated_grams":220,"calories_per_100g":180,"protein_g":7,"fat_g":6,"carbs_g":24,"fiber_g":2}]}'
+    "You are a food identification expert.\n"
+    "The CV pipeline classifies food into exactly 101 "
+    "categories (Food-101).\n"
+    "You MUST use one of these EXACT class names "
+    "(lowercase, underscores):\n"
+    f"{FOOD101_LIST_STR}\n\n"
+    "If unsure, pick the closest match.\n"
+    "Example: 'burger' -> hamburger, "
+    "'cheese pancakes' -> pancakes, "
+    "'noodle soup' -> ramen.\n\n"
+    'Respond ONLY with JSON: '
+    '{{"food_name": "exact_class_name", '
+    '"display_name": "Readable Name", '
+    '"action": "confirmed or corrected", '
+    '"vlm_confidence": <0.3-1.0 honest value>, '
+    '"food_description": "short desc", '
+    '"estimated_grams": <grams>}}'
 )
-
-SYSTEM_PROMPT = (
-    "You are a food identification and nutrition refinement expert. "
-    "A CV pipeline has already produced detections, candidate labels, and portion estimates. "
-    "Your job is to confirm or correct each item.\n\n"
-    "Use Food-101 labels whenever possible. "
-    f"Valid Food-101 labels: {FOOD101_LIST_STR}.\n\n"
-    "Decision process:\n"
-    "1. Look at the food appearance.\n"
-    "2. Compare it with the CV prediction and top-3 candidates.\n"
-    "3. Choose the best Food-101 label.\n"
-    "4. Estimate a realistic portion size in grams.\n"
-    "5. Return only valid JSON.\n\n"
-    "Confidence guide:\n"
-    "- 0.90 to 1.00: visually obvious match\n"
-    "- 0.75 to 0.89: strong guess\n"
-    "- 0.50 to 0.74: plausible but uncertain\n"
-    "- 0.30 to 0.49: weak guess\n\n"
-    "Strict rules:\n"
-    "- Do not output prose, markdown, or explanations outside JSON.\n"
-    "- Do not invent labels outside Food-101 unless absolutely forced.\n"
-    "- Prefer exact Food-101 labels over generic names.\n"
-    f"{LABEL_GUIDANCE}"
-)
-
-USER_PROMPT_TEMPLATE = """Refine this CV pipeline result.
-
-Trigger reason: {reason}
-Threshold: {threshold}
-Average CV confidence: {avg_confidence}
-
-CV output:
-{cv_output}
-
-Return JSON with this exact top-level structure:
-{{
-  "items": [
-    {{
-      "item_id": 1,
-      "action": "confirmed",
-      "original": {{
-        "food_name": "fried_rice",
-        "classification_confidence": 0.58
-      }},
-      "refined": {{
-        "food_name": "bibimbap",
-        "display_name": "Bibimbap",
-        "vlm_confidence": 0.86,
-        "food_description": "Rice bowl with vegetables and egg"
-      }},
-      "portion": {{
-        "estimated_grams": 240,
-        "portion_method": "vlm_visual_estimate",
-        "vlm_confidence": 0.74
-      }},
-      "nutrition_per_100g": {{
-        "calories_kcal": 150,
-        "protein_g": 5,
-        "fat_g": 4,
-        "carbs_g": 24,
-        "fiber_g": 2
-      }},
-      "nutrition_total": {{
-        "calories_kcal": 360,
-        "protein_g": 12,
-        "fat_g": 9.6,
-        "carbs_g": 57.6,
-        "fiber_g": 4.8
-      }}
-    }}
-  ],
-  "notes": ["optional note"]
-}}
-
-Return JSON only.
-"""
 
 FAST_USER_PROMPT = (
-    "The CV pipeline prediction is '{cv_prediction}' at {confidence}. "
-    "Look at the image and correct it if needed. "
-    "Return JSON only."
+    "The CV pipeline predicted this food is "
+    "'{cv_prediction}' with {confidence:.0%} confidence. "
+    "Look at the image. If wrong, correct it to the best "
+    "Food-101 class name. "
+    "Respond with JSON only."
 )
 
 
@@ -161,6 +141,7 @@ def build_user_prompt(
     avg_confidence: float,
     cv_output_json: str,
 ) -> str:
+    """Build the full user prompt with CV pipeline data."""
     return USER_PROMPT_TEMPLATE.format(
         reason=reason,
         threshold=threshold,
@@ -169,8 +150,12 @@ def build_user_prompt(
     )
 
 
-def build_fast_prompt(cv_prediction: str, confidence: float) -> str:
+def build_fast_prompt(
+    cv_prediction: str,
+    confidence: float,
+) -> str:
+    """Build a short prompt for fast inference."""
     return FAST_USER_PROMPT.format(
         cv_prediction=cv_prediction,
-        confidence=f"{confidence:.0%}",
+        confidence=confidence,
     )

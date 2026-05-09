@@ -4,17 +4,15 @@
 **Semester:** 02  
 **Project Title:** Food Calorie & Nutrient Estimator using CV + VLM  
 **Team Members:** Emiel, Luca, Mahesh, Furaha  
-**Date:** May 2026
+**Date:** April 2026
 
 ---
 
 ## Abstract
 
-This project develops a hybrid AI system for automatic food recognition and nutrition estimation from meal images. The system combines a **computer vision (CV) pipeline** with a **vision language model (VLM)** refinement stage. The CV pipeline handles food detection, classification, portion estimation, and nutrition lookup. The VLM stage activates only when the CV pipeline is uncertain, correcting low-confidence predictions while keeping computation manageable.
+This project develops a hybrid AI system for automatic food recognition and nutrition estimation from meal images. The system combines a **computer vision (CV) pipeline** with a **vision language model (VLM)** refinement stage. The CV pipeline is responsible for food detection, food classification, portion estimation, and nutrition lookup. The VLM stage is used only when the CV pipeline is uncertain, enabling the system to correct low-confidence predictions while keeping computation manageable.
 
-The classifier achieves **87.37% accuracy** on Food-101 using **EfficientNet-B0**. The detector achieves **mAP50 of 0.934** using **YOLOv8n-seg**. The nutrition module uses **sentence-transformer embeddings + FAISS** to retrieve the closest USDA food record from 9,013 entries. The VLM refinement uses **Gemini Flash** via Google AI Studio for production and was evaluated locally using **Gemma 4 (open-source)** through Ollama. Local evaluation on 10 food images showed the VLM improved the exact-or-partial match rate from **40% to 70%**, demonstrating that a hybrid CV + VLM design is practical for ambiguous food recognition tasks.
-
-The system is deployed as a full web application with user accounts, meal logging, dashboard, profile management, and AI-assisted correction — accessible from any device.
+The classifier is based on **EfficientNet-B0** trained on the **Food-101** dataset and achieved **87.37% accuracy**. The nutrition module uses **sentence-transformer embeddings + FAISS** to retrieve the closest USDA food record. The VLM refinement stage uses **Gemma 4 (open-source)** through **Ollama** for local inference. Initial local evaluation on 10 food images showed that the VLM improved the final exact-or-partial match rate from approximately **40% to 70%**, demonstrating that a hybrid CV + VLM design is practical for ambiguous food recognition tasks.
 
 ---
 
@@ -22,16 +20,16 @@ The system is deployed as a full web application with user accounts, meal loggin
 
 Estimating calories and nutrition from food images is an important problem in health tracking, diet analysis, and meal logging applications. However, this task is difficult because:
 
-- many foods look visually similar (e.g., ramen vs pho, filet_mignon vs prime_rib),
+- many foods look visually similar,
 - food portion sizes vary significantly,
 - a single image may contain multiple items,
 - nutrition databases use different naming conventions than image classifiers.
 
-A single CV model is often fast but may fail on ambiguous foods. Modern multimodal VLMs can reason better from visual context, but they are slower and more expensive. This project uses a **two-stage hybrid pipeline**:
+A single CV model is often fast but may fail on ambiguous foods. On the other hand, modern multimodal VLMs can reason better from visual context, but they are slower and more computationally expensive. Therefore, this project uses a **two-stage hybrid pipeline**:
 
-1. The CV pipeline processes the image quickly.
-2. If confidence is high enough, the system accepts the result.
-3. If confidence is low, the result passes to VLM refinement.
+1. First, a CV pipeline processes the image quickly.
+2. If the confidence is high enough, the system accepts the result.
+3. If confidence is low, the result is passed to a VLM refinement stage.
 
 This design balances **speed**, **accuracy**, and **interpretability**.
 
@@ -39,388 +37,336 @@ This design balances **speed**, **accuracy**, and **interpretability**.
 
 ## 2. Project Objectives
 
-- Detect food items in an input image using instance segmentation
-- Classify each item into one of 101 Food-101 classes
-- Estimate portion size in grams using plate reference and depth estimation
-- Retrieve nutrition values from USDA food data using semantic search
-- Refine uncertain predictions using a VLM
-- Provide a full web application with user accounts, meal logging, and personalized calorie targets
-- Deploy the system as a Dockerized service accessible from any device
+The main objectives of the project are:
+
+- detect food items in an input image,
+- classify each item into one of the Food-101 food classes,
+- estimate portion size in grams,
+- retrieve nutrition values from USDA food data,
+- refine uncertain predictions using a VLM,
+- output structured JSON suitable for integration into a meal logging system.
 
 ---
 
-## 3. Datasets and Data Pipeline
+## 3. Overall System Architecture
 
-### 3.1 Food-101 (Classification Training)
+The system is designed as a modular pipeline:
 
-| Property | Value |
-|----------|-------|
-| Total images | 101,000 |
-| Classes | 101 food categories |
-| Train split | 75,750 images (750 per class) |
-| Test split | 25,250 images (250 per class) |
-| Source | ETH Zurich, Bossard et al. 2014 |
+1. **YOLOv8n-seg detector** — detects food items and plate regions.
+2. **EfficientNet-B0 classifier** — classifies food crops into Food-101 classes.
+3. **Portion estimator** — estimates grams from segmentation masks and plate reference.
+4. **Nutrition lookup** — retrieves USDA nutrition per 100g using semantic search.
+5. **Confidence gate** — checks average confidence.
+6. **Gemma 4 VLM refinement** — corrects or confirms low-confidence cases.
+7. **Final JSON output** — item-level and total nutrition.
 
-The dataset spans diverse cuisines with categories like pizza, ramen, sushi, hamburger, chocolate_cake, pad_thai, and bibimbap. Many classes are visually similar (e.g., spaghetti_bolognese vs spaghetti_carbonara, caesar_salad vs greek_salad), making it a challenging benchmark.
-
-### 3.2 FoodSeg103 (Detection Training)
-
-| Property | Value |
-|----------|-------|
-| Total images | ~7,000+ |
-| Classes | 104 food categories + background |
-| Annotations | Instance-level segmentation masks |
-| Source | Wu et al. 2021 |
-
-The detector was trained to recognize two high-level classes — `plate` and `food` — using a curated subset of FoodSeg103.
-
-### 3.3 USDA FoodData Central (Nutrition Reference)
-
-| Property | Value |
-|----------|-------|
-| Datasets used | Foundation Foods + SR Legacy |
-| Records indexed | 9,013 unique food entries |
-| Fields | Description, calories, protein, fat, carbs, fiber (per 100g) |
-| Source | USDA FoodData Central |
-
-The USDA CSVs are processed by `scripts/build_usda_index.py` which:
-1. Parses food descriptions and nutrition values
-2. Encodes each description using `all-MiniLM-L6-v2` (384-dim embeddings)
-3. Builds a FAISS index for fast cosine similarity search
-4. Saves the index (`faiss_index.bin`) and records (`nutrition_records.json`)
-
-### 3.4 Density Table (Portion Reference)
-
-A hand-crafted lookup table maps all 101 Food-101 classes to typical food height (cm) and density (g/cm³). This table enables the portion estimator to convert estimated volume to mass.
+At the current stage of the project, the detector and FastAPI integration are not yet implemented, but the classifier, portion estimator, nutrition lookup, and VLM refinement modules are available.
 
 ---
 
-## 4. System Architecture
+## 4. Dataset and Models
 
-The system is designed as a modular pipeline with 7 stages:
+### 4.1 Food Classification Dataset
 
-```
-Image → YOLOv8 Detection → EfficientNet Classification → MiDaS Depth
-      → Portion Estimation → USDA FAISS Lookup → Confidence Gate
-      → [Optional: Gemini Flash VLM Refinement]
-      → Structured JSON Output
-```
+The classifier uses the **Food-101** dataset, which contains **101,000 food images** across **101 food classes**. The data is split into:
 
-### 4.1 Food Detection — YOLOv8n-seg
+- **75,750 training images**
+- **25,250 validation/test images**
 
-**Module:** `detector/detector.py`
+This dataset is well-suited for food recognition because it contains a broad variety of meal categories such as pizza, ramen, sushi, salad, burgers, and cakes.
 
-The detector uses **YOLOv8n-seg** (nano variant with instance segmentation), trained on FoodSeg103 for two classes: `plate` (class 0) and `food` (class 1).
+### 4.2 Classifier Model
 
-**Training performance:** mAP50 = 0.934
+The classification module is implemented in `classifier/classifier.py`. It uses **EfficientNet-B0** with a custom classification head:
 
-**Inference pipeline:**
-1. Input PIL image converted to numpy array
-2. YOLOv8 inference with confidence threshold 0.25, IoU threshold 0.45
-3. Masks resized to original image dimensions (nearest-neighbor interpolation)
-4. Plate mask stored separately for scaling reference
-5. Food items cropped with 10px padding for classification
+- Dropout(0.2)
+- Linear(1280 → 512)
+- SiLU activation
+- Dropout(0.2)
+- Linear(512 → 101)
 
-**Output:** List of food items (bbox, mask, crop, confidence) + plate mask + image dimensions.
+The model achieved **87.37% accuracy** after training and testing.
 
-### 4.2 Food Classification — EfficientNet-B0
+### 4.3 Portion Estimation Model
 
-**Module:** `classifier/classifier.py`
+The portion estimator is implemented in `portion/portion.py`. It does not use a learned neural network, but instead a **geometry + density lookup approach**:
 
-**Architecture:**
-```
-EfficientNet-B0 backbone (ImageNet pretrained)
-→ Global Average Pooling → 1280 features
-→ Dropout(0.2) → Linear(1280→512) → SiLU → Dropout(0.2) → Linear(512→101)
-```
+- segmentation mask area provides food size in pixels,
+- detected plate provides real-world scaling,
+- food-specific density table provides approximate volume-to-mass conversion.
 
-**Training:**
-- Fine-tuned on Food-101 with custom classification head
-- Preprocessing: Resize(256) → CenterCrop(224) → ToTensor → ImageNet normalize
-- **Test accuracy: 87.37%**
+This is a practical engineering solution that allows portion estimation without requiring a separate 3D estimation model.
 
-**Inference:** Returns top-k predictions with labels, display names, and softmax confidences.
+### 4.4 Nutrition Retrieval Model
 
-### 4.3 Depth Estimation — MiDaS_small
+The nutrition module in `nutrition/nutrition.py` uses:
 
-**Module:** `portion/depth_estimator.py`
+- **SentenceTransformer** (`all-MiniLM-L6-v2`) for text embeddings,
+- **FAISS** for nearest-neighbor search,
+- USDA records as the nutrition source.
 
-Uses **MiDaS_small** from Intel ISL loaded via `torch.hub`. Generates a normalized [0,1] depth map of the same size as the input image. Used to estimate relative food height above the plate surface.
+This allows the system to map predicted food labels to the closest USDA food description and retrieve per-100g nutritional information.
 
-### 4.4 Portion Estimation
+### 4.5 VLM Refinement Model
 
-**Module:** `portion/portion.py`
+The VLM refinement stage uses **Gemma 4 E4B** through **Ollama**. This model was selected because:
 
-**Two scaling modes:**
+- it is open-source,
+- it supports image + text input,
+- it can run locally on the available hardware,
+- it avoids cloud cost.
 
-| Mode | Condition | Method |
-|------|-----------|--------|
-| `plate_reference` | Plate detected | `cm_per_px = 13.0 / plate_radius_px` (26cm diameter plate assumed) |
-| `fallback_scale` | No plate | Assumes food occupies 40% of a standard plate footprint |
-
-**Grams calculation:**
-```
-food_area_cm2 = mask_pixels × (cm_per_px)²
-height_cm = MiDaS relative height × 8.0 (calibrated multiplier), or density table default
-volume_cm3 = food_area_cm2 × height_cm
-grams = volume_cm3 × density_g_cm3
-grams = clamp(grams, 10, 1500)
-```
-
-### 4.5 Nutrition Lookup — FAISS + SentenceTransformers
-
-**Module:** `nutrition/nutrition.py`
-
-**Approach:** Semantic similarity search over USDA food records.
-
-1. Food label (e.g., "fried_rice") → "fried rice"
-2. Encode with `all-MiniLM-L6-v2` → 384-dim embedding
-3. L2 normalize and search FAISS index (top-1)
-4. Return closest USDA record's nutrition per 100g
-5. Scale to portion: `total = per_100g × (grams / 100)`
-
-### 4.6 VLM Refinement — Gemini Flash / Gemma 4
-
-**Modules:** `vlm/refiner.py`, `vlm/schemas.py`, `vlm/prompts.py`, `vlm/client.py`
-
-**Trigger conditions:**
-- Average confidence < 0.70, OR
-- No plate detected
-
-**VLM Refinement pipeline:**
-1. Validate input with Pydantic schemas (`VLMRequest`)
-2. Build structured prompt containing:
-   - Full Food-101 class list (101 valid labels)
-   - Common mapping guidance (burger→hamburger, etc.)
-   - Confidence calibration guidelines
-   - Complete CV output JSON
-3. Send image + prompt to Gemini Flash (production) or Gemma 4 via Ollama (local)
-4. Parse JSON response, normalize food labels to Food-101 classes
-5. Recalculate portion and nutrition
-6. Return structured `VLMResponse` with per-item actions (confirmed/corrected)
-
-**Prompt engineering evolution:**
-- **v1:** Generic prompt → returned free-form names like "pasta", "burger", "salad bowl"
-- **v2:** Added full Food-101 class list + mapping guidance + calibration instructions → exact match rate improved significantly
-
-**Dual-backend client** supports:
-- Google AI Studio (Gemini Flash) — for production deployment
-- Ollama (Gemma 4 E4B) — for local development, zero cost
+The VLM receives the original image plus the CV pipeline output and produces corrected or confirmed predictions in structured JSON format.
 
 ---
 
-## 5. Application Layer
+## 5. Methodology
 
-### 5.1 FastAPI Backend
+### 5.1 CV Pipeline Workflow
 
-**Module:** `api/app.py`
+The intended CV workflow is as follows:
 
-- `POST /analyze` — accepts JPG/PNG image, returns nutrition JSON
-- `GET /status` — module availability check
-- `GET /docs` — Swagger UI
-- Lazy-loaded models (first request initializes)
-- Graceful mock fallbacks when models unavailable
+1. Input image is passed to the YOLO detector.
+2. Each detected food region is cropped.
+3. Each crop is classified by EfficientNet-B0.
+4. Portion size is estimated from the segmentation mask.
+5. Nutrition values are retrieved from USDA FAISS lookup.
+6. Average confidence is computed.
+7. If the confidence is lower than a threshold, VLM refinement is triggered.
 
-### 5.2 Gradio Frontend
+### 5.2 Why a Confidence Threshold is Needed
 
-**Module:** `ui/app.py`
+The VLM is slower than the CV pipeline, so it is not efficient to use it on every image. Instead, the system uses a threshold to decide when the CV result is too uncertain.
 
-- **Analyze tab:** Upload/capture image, view results with bounding boxes, log meal, AI correction
-- **Dashboard tab:** Daily calorie tracker, 7-day history, meal list, manual logging
-- **Profile tab:** BMR/TDEE calculator, goal setting, macro targets, weight tracking
-- Dark theme with custom CSS
-- Responsive design for mobile and desktop
+At the current project stage, **0.70** is used as a **provisional threshold**. This is not claimed to be a universally optimal value. Instead, it is a practical initial cutoff motivated by research on confidence-based routing, selective classification, and human-in-the-loop systems. The exact threshold should ideally be tuned using validation data.
 
-### 5.3 Supporting Modules
+### 5.3 VLM Refinement Workflow
 
-| Module | File | Function |
-|--------|------|----------|
-| Authentication | `ui/auth.py` | SHA256+salt password hashing, register/login |
-| Meal Database | `ui/db.py` | SQLite meal logging with per-user isolation |
-| Profile | `ui/profile.py` | Mifflin-St Jeor BMR, TDEE, personalized targets |
-| AI Chat | `ui/llm_chat.py` | Gemini 2.5 Flash Lite for correction and manual logging |
+The VLM stage was developed by Mahesh and Furaha. It follows this flow:
 
----
+1. Validate input JSON using Pydantic schemas.
+2. Build a prompt containing:
+   - reason for refinement,
+   - confidence threshold,
+   - full CV output,
+   - explicit Food-101 class constraints.
+3. Send image + prompt to Gemma 4.
+4. Parse the returned JSON.
+5. Recalculate totals and return a structured `VLMResponse`.
 
-## 6. Experimental Results
+### 5.4 Prompt Engineering
 
-### 6.1 Classifier Performance
+During development, prompt quality turned out to be very important. The first version of the prompt often returned:
 
-| Metric | Value |
-|--------|-------|
-| Model | EfficientNet-B0 (custom head) |
-| Dataset | Food-101 (75,750 train / 25,250 test) |
-| Test accuracy | **87.37%** |
-| Input resolution | 224×224 |
+- generic names like `pasta`,
+- free-form descriptions instead of Food-101 labels,
+- overconfident outputs (e.g. always 95%).
 
-### 6.2 Detector Performance
+To address this, the prompt was updated to:
 
-| Metric | Value |
-|--------|-------|
-| Model | YOLOv8n-seg |
-| Dataset | FoodSeg103 (plate + food classes) |
-| mAP50 | **0.934** |
-
-### 6.3 VLM Evaluation (10-image benchmark)
-
-**Setup:** 10 food images with deliberately wrong CV predictions sent to Gemma 4 E4B via Ollama on local hardware.
-
-**System:** Intel i7-1165G7, 32 GB RAM, NVIDIA T500 (4 GB), Windows 11
-
-| # | Image | CV Prediction | VLM Prediction | Actual | Match |
-|---|-------|--------------|----------------|--------|-------|
-| 1 | pizza.jpg | pizza (45%) | pizza | pizza | EXACT ✅ |
-| 2 | burger.jpg | hot_dog (38%) | burger | hamburger | PARTIAL 🟡 |
-| 3 | sushi.jpg | sushi (50%) | Sushi Rolls | sushi | PARTIAL 🟡 |
-| 4 | pasta.jpg | ramen (42%) | pasta | spaghetti_bolognese | WRONG ❌ |
-| 5 | salad.jpg | caesar_salad (35%) | Salad Bowl | greek_salad | WRONG ❌ |
-| 6 | pancakes.jpg | french_toast (40%) | pancakes | pancakes | EXACT ✅ |
-| 7 | icecream.jpg | frozen_yogurt (33%) | ice cream | ice_cream | EXACT ✅ |
-| 8 | steak.jpg | filet_mignon (48%) | steak | steak | EXACT ✅ |
-| 9 | ramen.jpg | pho (36%) | Shrimp Noodle Soup | ramen | WRONG ❌ |
-| 10 | cake.jpg | red_velvet_cake (41%) | chocolate_cake | chocolate_cake | EXACT ✅ |
-
-**Summary:**
-
-| Metric | CV Alone | After VLM | Change |
-|--------|----------|-----------|--------|
-| Exact matches | 3/10 (30%) | 5/10 (50%) | +67% |
-| Exact + partial | 4/10 (40%) | 7/10 (70%) | +75% |
-| Wrong | 6/10 (60%) | 3/10 (30%) | −50% |
-| Avg confidence | 0.41 | 0.95 | +132% |
-
-### 6.4 CV vs VLM Comparison
-
-| Metric | CV Pipeline | VLM (Gemma 4 E4B) |
-|--------|------------|-------------------|
-| Time per image | ~50 ms | ~146,000 ms |
-| Throughput | ~20 images/sec | ~1 image per 2.4 min |
-| Hardware | CPU only | 4+ GB VRAM or cloud |
-| Cost per image | ~$0.00 | $0.00 local / ~$0.02 cloud |
-
-**Per-image outcome:**
-- CV correct, VLM confirmed: 2 images (20%)
-- CV wrong, VLM fixed: 5 images (50%)
-- CV wrong, VLM closer but not exact: 1 image (10%)
-- Both wrong: 2 images (20%)
-
-### 6.5 Estimated Hybrid Performance
-
-Based on 87.37% classifier accuracy and 70% confidence threshold:
-- ~87% of images: CV correct, no VLM needed (fast path)
-- ~13% of images: CV uncertain, VLM triggered (slow but more accurate path)
-- **Estimated combined accuracy:** ~92% (up from 87% CV-only)
+- include the **full Food-101 class list**,
+- require exact Food-101 names when possible,
+- enforce JSON-only responses,
+- encourage more realistic confidence scores.
 
 ---
 
-## 7. Visualization and Analysis
+## 6. Implementation Progress
 
-### 7.1 Embedding Visualization
+### 6.1 Completed Components
 
-Generated t-SNE plots and cosine similarity heatmaps using `all-MiniLM-L6-v2` embeddings of all 101 Food-101 class names.
+The following components are complete:
 
-**Key findings:**
-- Desserts cluster together (cake, tiramisu, panna_cotta)
-- Asian noodle dishes cluster (ramen, pho, pad_thai)
-- Similar pairs with high cosine similarity: filet_mignon↔prime_rib (0.89), spaghetti_bolognese↔spaghetti_carbonara (0.88), chocolate_cake↔red_velvet_cake (0.87)
-- This explains classifier confusion between these categories
+- **EfficientNet-B0 classifier**
+- **Portion estimator**
+- **USDA nutrition lookup**
+- **VLM schemas**
+- **VLM prompts**
+- **Gemma 4 client**
+- **VLM refiner module**
+- **Offline tests**
+- **Local live VLM test**
+- **10-image evaluation framework**
+- **Embedding visualization**
+- **Grad-CAM visualization (demo mode)**
+- **Colab notebook for VLM refinement**
 
-**Generated files:** `output/tsne_food101.png`, `output/similarity_heatmap.png`, `output/confusion_pairs.png`
+### 6.2 Incomplete / Pending Components
 
-### 7.2 Grad-CAM Visualization
+The following components are not yet complete:
 
-Grad-CAM heatmaps showing which image regions the EfficientNet-B0 classifier attends to for each prediction.
+- **YOLOv8 detector** (`detector/__init__.py` is empty)
+- **FastAPI integration** (`api/__init__.py` is empty)
+- **Real end-to-end integration with actual detector outputs**
+- **Classifier weight sharing / final deployment packaging**
 
-**Generated files:** `output/gradcam_*.png` (one per eval image)
+This means that the current VLM stage is tested using **mock CV outputs**, not yet with the fully integrated detector.
 
 ---
 
-## 8. Deployment
+## 7. Experimental Results
 
-### 8.1 Docker Architecture
+### 7.1 Offline Tests
 
-Two containers managed by `docker-compose.yml`:
+The offline test script validated:
 
-| Container | Port | Purpose |
-|-----------|------|---------|
-| `cv-pipeline` | 8000 | FastAPI backend with all ML models |
-| `gradio-ui` | 7860 | Gradio frontend with auth, DB, chat |
+- input schema (`VLMRequest`),
+- output schema (`VLMResponse`),
+- prompt builder,
+- client setup.
 
-**Server:** Hetzner CX23 (2 vCPU, 4GB RAM) — runs inference on CPU.
+All offline tests passed successfully.
 
-### 8.2 Model Files
+### 7.2 Live Single-Image Test
 
-```
-models/
-├── yolov8n_food_best.pt              # YOLOv8 detector weights
-├── efficientnet_b0_food101_best.pt   # Classifier weights
-└── classifier/
-    └── idx_to_class.json             # Label mapping
+A local live test was run with Gemma 4 through Ollama. In that test:
 
-data/usda/
-├── faiss_index.bin                   # FAISS nutrition index
-└── nutrition_records.json            # USDA food records
-```
+- the mock CV prediction was: `spaghetti_bolognese (55%)`,
+- the image actually showed a cheese pancake / toast dish,
+- the VLM corrected the prediction to a pancake-based food,
+- the output was returned as valid JSON.
+
+This demonstrated that the VLM routing mechanism and prompt structure worked correctly.
+
+### 7.3 Multi-Image Evaluation
+
+A 10-image evaluation was performed on local hardware using Gemma 4 E4B. The recorded results were:
+
+| Metric | Result |
+|--------|--------|
+| Total images | 10 |
+| Exact matches | 5 |
+| Partial matches | 2 |
+| Wrong | 3 |
+| Overall exact+partial accuracy | **70%** |
+| Corrections made | 8 |
+| Corrections right | 5 |
+| Average inference time | **146s per image** |
+
+### 7.4 Detailed Evaluation Table
+
+| Image | Actual Food | CV Said | VLM Said | Match |
+|------|-------------|---------|----------|-------|
+| pizza.jpg | pizza | pizza | pizza | exact |
+| burger.jpg | hamburger | hot_dog | burger | partial |
+| sushi.jpg | sushi | sushi | Sushi Rolls | partial |
+| pasta.jpg | spaghetti_bolognese | ramen | pasta | wrong |
+| salad.jpg | greek_salad | caesar_salad | Salad Bowl | wrong |
+| pancakes.jpg | pancakes | french_toast | pancakes | exact |
+| icecream.jpg | ice_cream | frozen_yogurt | ice cream | exact |
+| steak.jpg | steak | filet_mignon | steak | exact |
+| ramen.jpg | ramen | pho | Shrimp Noodle Soup | wrong |
+| cake.jpg | chocolate_cake | red_velvet_cake | chocolate_cake | exact |
+
+### 7.5 Interpretation of Results
+
+These results show that the VLM is useful, but not perfect.
+
+**Positive findings:**
+- it successfully corrected several wrong CV predictions,
+- it improved the final exact-or-partial match rate,
+- it handled obvious foods like pizza, pancakes, steak, ice cream, and cake well.
+
+**Observed limitations:**
+- it sometimes returned names that were semantically close but not exact Food-101 class names,
+- it struggled with ambiguous dishes like ramen vs pho,
+- generic categories like `pasta` or `salad bowl` reduced exact-match performance,
+- inference time was high on local hardware.
+
+---
+
+## 8. Visualization and Analysis
+
+To strengthen the interpretability aspect of the project, two visualization directions were developed.
+
+### 8.1 Embedding Visualization (Lab 3 Alignment)
+
+A t-SNE plot and cosine similarity heatmap were generated using sentence-transformer embeddings of Food-101 class names.
+
+These visualizations showed that:
+
+- dessert foods cluster together,
+- salad classes are close to each other,
+- pasta-related dishes show moderate similarity,
+- confusion-prone foods (e.g. caesar_salad vs greek_salad, chocolate_cake vs red_velvet_cake) are semantically close in embedding space.
+
+This helps explain why some foods are harder to distinguish for a classifier.
+
+### 8.2 Grad-CAM Visualization (Lab 2 Alignment)
+
+Grad-CAM plots were also generated. Since the real classifier weights were not yet placed in the project, Grad-CAM currently runs in **demo mode** using random weights. Therefore:
+
+- the pipeline for visualization is working,
+- but the visual explanations are not yet scientifically meaningful,
+- final Grad-CAM analysis requires the real trained EfficientNet model weights from Luca.
 
 ---
 
 ## 9. Discussion
 
-### Key Findings
+The project demonstrates the usefulness of a **hybrid CV + VLM system** for food understanding. Pure CV is efficient but makes mistakes on visually similar foods. A VLM can improve these low-confidence cases by incorporating broader visual reasoning.
 
-1. **Hybrid design works.** The selective CV + VLM approach improved accuracy from 40% to 70% on ambiguous cases while only invoking the VLM on ~30% of images.
-2. **Prompt engineering is critical.** Adding the full Food-101 class list and mapping guidance to the VLM prompt significantly reduced generic outputs.
-3. **Portion estimation is the weakest link.** The geometry + density approach is practical but rough. MiDaS depth calibration is ongoing using the Nutrition5k dataset.
-4. **Local VLM is feasible but slow.** Gemma 4 E4B ran on a laptop with a 4GB GPU but took ~2.5 minutes per image. Production uses Gemini Flash via API (seconds).
-5. **FAISS semantic search handles naming mismatches well.** A classifier output of "fried_rice" correctly maps to "Restaurant, Chinese, fried rice" in USDA without exact string matching.
+However, several important lessons were learned:
 
-### Limitations
-
-| Limitation | Impact | Mitigation |
-|------------|--------|-----------|
-| 101 food classes only | Home-cooked and non-Western foods often misclassified | VLM handles out-of-distribution cases |
-| Portion accuracy | MiDaS calibration multiplier (8.0) is rough estimate | Ongoing Nutrition5k calibration |
-| No GPU on server | Inference takes 1-5 seconds on CPU | Acceptable for demo; faster with GPU |
-| USDA coverage (9K entries) | Branded and specialty foods may not be found | Planned expansion to 400K+ entries |
-| Gradio session resets | Users must log in after closing browser | Planned persistent session |
+1. **Prompt engineering matters a lot.** Small changes in prompt wording significantly changed result quality.
+2. **Confidence thresholding is necessary.** Running a VLM on every image is too slow.
+3. **Open-source local models are practical but slower.** Gemma 4 worked locally without cost, but latency was high.
+4. **Exact label constraints are important.** Without explicit class constraints, VLMs tend to produce free-form names.
+5. **Evaluation needs both exact and partial scoring.** In food recognition, semantically close labels are common.
 
 ---
 
-## 10. Future Work
+## 10. Limitations
 
-- [ ] MiDaS calibration via Nutrition5k dataset
-- [ ] Expand USDA to Branded Foods (400K+ entries)
-- [ ] Custom food entries per user
-- [ ] Progressive Web App (installable on phone)
-- [ ] Retrain classifier with more food classes
-- [ ] Persistent login sessions
-- [ ] Threshold tuning experiment on larger validation set
-- [ ] VLM prompt version comparison study
+The current project has several limitations:
+
+- no completed detector, so no fully integrated end-to-end food pipeline,
+- no final API layer,
+- no calibrated threshold tuning experiment yet,
+- VLM evaluation used mock CV predictions,
+- Grad-CAM currently lacks real trained weights,
+- local inference speed is slow for production use.
 
 ---
 
-## 11. Conclusion
+## 11. Future Work
 
-This project successfully built a complete hybrid food recognition and nutrition estimation system. The CV components for detection, classification, portion estimation, and nutrition retrieval are all integrated and working. The VLM refinement stage has been designed, implemented, and evaluated locally and in production.
+Future work should include:
 
-**Key results:**
-- EfficientNet-B0 classifier: **87.37% accuracy** on Food-101
-- YOLOv8n-seg detector: **mAP50 = 0.934** on FoodSeg103
-- VLM refinement: improved accuracy from **40% to 70%** on ambiguous cases
-- Full web application is dockerized and can be deployed on a server
+- implementing the YOLO detector,
+- integrating all modules into the FastAPI layer,
+- tuning the confidence threshold empirically,
+- evaluating prompt version 2 against prompt version 1,
+- running more systematic experiments on a larger food image set,
+- using real classifier weights for Grad-CAM,
+- comparing local Gemma 4 against cloud-based multimodal models,
+- testing calibration metrics such as ECE or reliability diagrams.
 
-The system aligns with core deep learning concepts including CNN classification, embeddings and similarity search, interpretability (Grad-CAM), and multimodal reasoning (VLMs). The project provides a strong foundation for a production-ready meal analysis system.
+---
+
+## 12. Conclusion
+
+This project successfully developed the core parts of a hybrid food recognition pipeline. The CV components for **classification**, **portion estimation**, and **nutrition retrieval** are in place, and the VLM refinement stage has been designed, implemented, and tested locally using **Gemma 4**.
+
+The classifier achieved **87.37% accuracy** on Food-101, and the VLM stage improved multi-image evaluation performance to **70% exact-or-partial accuracy** on a local 10-image benchmark. Although the project is not yet fully integrated end-to-end due to missing detector and API components, the work completed so far demonstrates that a selective CV + VLM design is both technically feasible and educationally valuable.
+
+The system aligns well with core deep learning concepts from the course, including:
+
+- CNN-based image classification,
+- embeddings and semantic similarity,
+- interpretability through Grad-CAM,
+- generative AI / multimodal reasoning through VLMs.
+
+Overall, the project provides a strong foundation for a future production-ready meal analysis system.
 
 ---
 
 ## References
 
-1. Bossard, L., et al. "Food-101 – Mining Discriminative Components with Random Forests." ECCV 2014.
-2. Tan, M. & Le, Q. "EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks." ICML 2019.
-3. Jocher, G. et al. "Ultralytics YOLOv8." 2023.
-4. Reimers, N. & Gurevych, I. "Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks." EMNLP 2019.
-5. Johnson, J. et al. "Billion-scale similarity search with GPUs." IEEE TBD 2021.
-6. Ranftl, R. et al. "Towards Robust Monocular Depth Estimation: Mixing Datasets for Zero-shot Cross-dataset Transfer." TPAMI 2022.
-7. Wu, X. et al. "FoodSeg103: A Large-Scale Dataset for Food Segmentation." ACM MM 2021.
-8. USDA FoodData Central. https://fdc.nal.usda.gov/
-9. Google Gemini API. https://ai.google.dev/
+1. Food-101 dataset  
+2. EfficientNet architecture  
+3. YOLOv8 segmentation  
+4. SentenceTransformers (all-MiniLM-L6-v2)  
+5. FAISS similarity search  
+6. Gemma 4 multimodal model  
+7. USDA FoodData Central database

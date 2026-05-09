@@ -1,36 +1,36 @@
-# Project Documentation
+# Project Documentation Index
 
-Documentation for the **Food Calorie & Nutrient Estimator** — a hybrid CV + VLM food recognition and nutrition estimation system.
-
----
+This folder contains the main documentation for the **Food Calorie & Nutrient Estimator** project.
 
 ## Documents
 
-| Document | Description |
-|----------|-------------|
-| [**Pipeline Guide**](PIPELINE_GUIDE.md) | Complete technical reference: data sources, CV pipeline, VLM pipeline, API, output formats |
-| [**Project Report**](report.md) | Academic report: objectives, methodology, experiments, results, discussion |
-| [**User Manual**](USER_MANUAL.md) | How to use the app: analyzing meals, logging, dashboard, profile, troubleshooting |
-| [**Run & Test Guide**](RUN_AND_TEST_GUIDE.md) | Setup, installation, running scripts, evaluation, and troubleshooting |
+- [report.md](C:\Users\mahes\OneDrive\Desktop\SEMESTER 02\Deep Learning\GitRepo_Project\Project\food-pipeline\docs\report.md) — Main project report with objectives, methodology, progress, experiments, results, discussion, and conclusion.
+- [RUN_AND_TEST_GUIDE.md](C:\Users\mahes\OneDrive\Desktop\SEMESTER 02\Deep Learning\GitRepo_Project\Project\food-pipeline\docs\RUN_AND_TEST_GUIDE.md) — Step-by-step handbook for setup, installation, running scripts, expected outcomes, and troubleshooting.
+- [DATA_SETUP.md](C:\Users\mahes\OneDrive\Desktop\SEMESTER 02\Deep Learning\GitRepo_Project\Project\food-pipeline\docs\DATA_SETUP.md) — Data and model download/setup checklist, including USDA data and classifier weights.
+- [Full_Pipeline_Guide.pdf](C:\Users\mahes\OneDrive\Desktop\SEMESTER 02\Deep Learning\GitRepo_Project\Project\food-pipeline\docs\Full_Pipeline_Guide.pdf) — PDF guide explaining the full architecture, pipeline, team roles, and technical design.
 
 ## Suggested Reading Order
 
-1. [**Pipeline Guide**](PIPELINE_GUIDE.md) — understand how everything works
-2. [**Project Report**](report.md) — academic context and experimental results
-3. [**User Manual**](USER_MANUAL.md) — how to use the application
-4. [**Run & Test Guide**](RUN_AND_TEST_GUIDE.md) — how to set up and run the system
+1. [report.md](C:\Users\mahes\OneDrive\Desktop\SEMESTER 02\Deep Learning\GitRepo_Project\Project\food-pipeline\docs\report.md)
+2. [Full_Pipeline_Guide.pdf](C:\Users\mahes\OneDrive\Desktop\SEMESTER 02\Deep Learning\GitRepo_Project\Project\food-pipeline\docs\Full_Pipeline_Guide.pdf)
+3. [RUN_AND_TEST_GUIDE.md](C:\Users\mahes\OneDrive\Desktop\SEMESTER 02\Deep Learning\GitRepo_Project\Project\food-pipeline\docs\RUN_AND_TEST_GUIDE.md)
+4. [DATA_SETUP.md](C:\Users\mahes\OneDrive\Desktop\SEMESTER 02\Deep Learning\GitRepo_Project\Project\food-pipeline\docs\DATA_SETUP.md)
 
-## Generated Outputs
+## Notes
 
-Visualization outputs are in the project `output/` folder:
+- The VLM refinement module is implemented and tested locally.
+- The detector and FastAPI integration are still pending.
+- Some visualizations (Grad-CAM) currently run in demo mode until the trained classifier weights are added.
+- Evaluation results are available in `data/eval_results.json`.
 
-| File | Description |
-|------|-------------|
-| `tsne_food101.png` | 2D t-SNE embedding plot of 101 Food-101 classes |
-| `similarity_heatmap.png` | Cosine similarity matrix between food classes |
-| `confusion_pairs.png` | Bar chart of most similar food pairs |
-| `gradcam_*.png` | Grad-CAM heatmaps per evaluation image |
+## Related Outputs
 
-Evaluation data:
-- `data/eval/` — 10 evaluation food images
-- `data/eval_results.json` — VLM evaluation results
+Generated plots are in the project `output/` folder:
+- `tsne_food101.png`
+- `similarity_heatmap.png`
+- `confusion_pairs.png`
+- `gradcam_*.png`
+
+Evaluation data is in:
+- `data/eval/`
+- `data/eval_results.json`

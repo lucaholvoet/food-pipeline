@@ -193,7 +193,6 @@ When VLM refinement triggers, response includes `refinement_status` and per-item
 
 ## Known Limitations
 
-- **Portion accuracy** — MiDaS calibration in progress using Nutrition5k dataset. Current multiplier (8.0) is a rough estimate.
 - **101 food classes** — EfficientNet-B0 is limited to Food-101 classes. Many home-cooked foods not covered.
 - **No GPU** — inference runs on CPU (~1-2 seconds). Server has no GPU.
 - **USDA coverage** — 9,013 entries. Branded and specialty foods often not found.
@@ -203,7 +202,6 @@ When VLM refinement triggers, response includes `refinement_status` and per-item
 
 ## Roadmap
 
-- [ ] MiDaS calibration via Nutrition5k (notebook in `/scripts/`)
 - [ ] Expand USDA to Branded Foods (400k+ entries)
 - [ ] Custom food entries per user
 - [ ] PWA — installable on phone home screen
